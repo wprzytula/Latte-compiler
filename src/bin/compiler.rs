@@ -2,11 +2,11 @@
 // use latte::frontend::{parse, Prog};
 use std::error::Error;
 use std::fs::{canonicalize, File};
-use std::io::{BufRead, BufReader, Write, self};
+use std::io::{self, BufRead, BufReader, Write};
 
-use std::{mem, env};
 use std::path::Path;
 use std::process::{Command, ExitStatus};
+use std::{env, mem};
 
 const RUNTIME_PATH: &str = "lib/runtime.ll";
 
@@ -52,7 +52,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     // }
     mem::drop(s_file); // also flushes
 
-    execute("nasm", &["-o", o_filepath.to_str().unwrap(), s_filepath.to_str().unwrap()])?;
+    execute(
+        "nasm",
+        &[
+            "-o",
+            o_filepath.to_str().unwrap(),
+            s_filepath.to_str().unwrap(),
+        ],
+    )?;
 
     execute(
         "ld",
