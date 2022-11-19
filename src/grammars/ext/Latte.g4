@@ -81,8 +81,8 @@ expr
     | '(' type_ ')' 'null'                                  # ENull
     | '(' expr ')'                                          # EParen
     | expr '[expr]'                                         # EArrSub
-    | <assoc=right> ID '.' ID                               # EField
-    | <assoc=right> ID . ID '(' ( expr ( ',' expr )* )? ')' # EMetCall
+    | <assoc=right> expr '.' ID                               # EField
+    | <assoc=right> expr '.' ID '(' ( expr ( ',' expr )* )? ')' # EMetCall
     ;
 
 addOp
