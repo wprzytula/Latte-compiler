@@ -1,0 +1,39 @@
+Sugestie Konrada Iwanickiego:
+
+front-end (4) ->
+    - zrobić od razu z rozszerzeniami, albo przynajmniej uwzględnić je w gramatyce;
+      wpp trzeba przeorać potężnie frontend
+
+back-end LLVM (8) albo x86 (10)
+    - robić x86, bo więcej punktów.
+
+użycie rejestrów i phi zamiast alloc w LLVM - dodatkowo 2p
+    - można to dostać za wykorzystanie rejestrów dla x86 (:O)
+
+wykorzystanie rejestrów dla x86 - dodatkowo do 5p (na 5p pełna alokacja rejestrów)
+    - idealnie byłoby mieć maszynę stosową jako minimal working mode, i przełączać na żądanie
+      na mądrzejsze wykorzystanie rejestrów
+
+optymalizacje - do 10p
+    LCSE/GCSE - 3/5p
+        - zestaw 4 kanonicznych optymalizacji; GCSE wymagają SSA...
+    optymalizacja pętli (zmienne indukcyjne i redukcja mocy) 2p
+        - zmienne indukcyjne to nietrywialne zależności między zmiennymi;
+          trudne, ale można zrobić tylko w miarę proste przypadki
+        - redukcja mocy to zamiana droższej operacji na tańszą; np. mnożenia na dodawanie;
+          dość trudne, ale można próbować
+    function inlining 1-3p (proszę zawczasu przedyskutować z prowadzącym)
+        - wymaga dyskusji faktycznie; heurystyki oceniające, czy warto dokonać inline'owania
+
+Rozszerzenia (notacja x/y oznacza punkty za backend w wersji odpowiednio LLVM/x86);
+szczegółowy opis rozszerzeń zawarty jest w opisie języka.
+    tablice (1)
+    struktury (2)
+    obiekty (atrybuty, metody, dziedziczenie bez zastępowania metod) - dodatkowo (3/4)
+        - uwaga na rzutowanie null'a; trzeba sensownie napisać gramatykę.
+    metody wirtualne - dodatkowo (3/4), czyli za obiekty z metodami wirtualnymi mozna uzyskać 8/10 punktów.
+        - polecane, bo łatwo to dodać jeśli już mamy obiekty
+    odśmiecanie (2)
+        - dotyczy tylko stringów, można robić
+    zarządzanie pamięcią a la Rust (2) (wyklucza się z odśmiecaniem)
+        - odradzane, wymaga dużo analizy semantycznej
