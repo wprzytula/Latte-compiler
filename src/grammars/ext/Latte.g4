@@ -31,23 +31,35 @@ decl
     : type_ item ( ',' item )* ';'
     ;
 
+item
+    : ID
+    | ID '=' expr
+    ;
+
 block
     : '{' stmt* '}'
     ;
 
 stmt
-    : ';'                                # Empty
-    | block                              # BlockStmt
-    | decl                               # VarDecl
-    | ID '=' expr ';'                    # Ass
-    | ID '++' ';'                        # Incr
-    | ID '--' ';'                        # Decr
-    | 'return' expr ';'                  # Ret
-    | 'return' ';'                       # VRet
-    | 'if' '(' expr ')' stmt             # Cond
-    | 'if' '(' expr ')' stmt 'else' stmt # CondElse
-    | 'while' '(' expr ')' stmt          # While
-    | expr ';'                           # SExp
+    : ';'                                   # Empty
+    | block                                 # BlockStmt
+    | decl                                  # VarDecl
+    | lval '=' expr ';'                     # Ass
+    | lval '++' ';'                         # Incr
+    | lval '--' ';'                         # Decr
+    | 'return' expr ';'                     # Ret
+    | 'return' ';'                          # VRet
+    | 'if' '(' expr ')' stmt                # Cond
+    | 'if' '(' expr ')' stmt 'else' stmt    # CondElse
+    | 'while' '(' expr ')' stmt             # While
+    | expr ';'                              # SExp
+    | 'for' '(' type_ ID ':' expr ')' stmt  # For
+    ;
+
+lval
+    : ID                            # LID
+    | <assoc=right> lval '.' ID     # LField
+    | lval '[' expr ']'             # LArr
     ;
 
 type_
@@ -55,34 +67,37 @@ type_
     | 'string'      # Str
     | 'boolean'     # Bool
     | 'void'        # Void
-
     | type_ '[]'    # Arr
     | ID            # Class
     ;
 
-item
-    : ID
-    | ID '=' expr
+newtype_
+    : 'int'                 # NInt
+    | 'string'              # NStr
+    | 'boolean'             # NBool
+    | type_ '[' expr ']'    # NArr
+    | ID                    # NClass
     ;
 
 expr
-    : ('-'|'!') expr                                        # EUnOp
-    | expr mulOp expr                                       # EMulOp
-    | expr addOp expr                                       # EAddOp
-    | expr relOp expr                                       # ERelOp
-    | <assoc=right> expr '&&' expr                          # EAnd
-    | <assoc=right> expr '||' expr                          # EOr
-    | ID                                                    # EId
-    | INT                                                   # EInt
-    | 'true'                                                # ETrue
-    | 'false'                                               # EFalse
-    | ID '(' ( expr ( ',' expr )* )? ')'                    # EFunCall
-    | STR                                                   # EStr
-    | '(' type_ ')' 'null'                                  # ENull
-    | '(' expr ')'                                          # EParen
-    | expr '[expr]'                                         # EArrSub
-    | <assoc=right> expr '.' ID                               # EField
+    : ('-'|'!') expr                                            # EUnOp
+    | expr mulOp expr                                           # EMulOp
+    | expr addOp expr                                           # EAddOp
+    | expr relOp expr                                           # ERelOp
+    | <assoc=right> expr '&&' expr                              # EAnd
+    | <assoc=right> expr '||' expr                              # EOr
+    | ID                                                        # EId
+    | INT                                                       # EInt
+    | 'true'                                                    # ETrue
+    | 'false'                                                   # EFalse
+    | ID '(' ( expr ( ',' expr )* )? ')'                        # EFunCall
+    | STR                                                       # EStr
+    | '(' type_ ')' 'null'                                      # ENull
+    | '(' expr ')'                                              # EParen
+    | <assoc=right> expr '[' expr ']'                           # EArrSub
+    | <assoc=right> expr '.' ID                                 # EField
     | <assoc=right> expr '.' ID '(' ( expr ( ',' expr )* )? ')' # EMetCall
+    | 'new' newtype_                                            # ENew
     ;
 
 addOp
