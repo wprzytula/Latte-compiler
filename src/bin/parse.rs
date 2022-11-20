@@ -1,21 +1,16 @@
-use antlr_rust::recognizer::Recognizer;
-use antlr_rust::Parser;
 use antlr_rust::{
     parser::ParserNodeType,
-    token_stream::TokenStream,
-    tree::ParseTreeVisitorCompat,
     tree::{ParseTree, ParseTreeVisitor, VisitChildren},
 };
 use latte::frontend::parser::{
     build_parser,
     latteparser::{
-        AddOpContext, ArgContext, DeclContextAttrs, LatteParserContextType, LatteTreeWalker,
+        AddOpContext, ArgContext, DeclContextAttrs, LatteParserContextType,
         MulOpContext, ProgramContext, RelOpContext,
     },
     lattevisitor::LatteVisitor,
     IntervalDisplayer,
 };
-use std::{error::Error, mem};
 
 struct Visitor {
     indent: usize,
@@ -286,11 +281,9 @@ fn main() -> Result<(), ParseError> {
     let filename = std::env::args().nth(1).expect("Filename arg missing");
 
     let (mut parser, was_error, interval_displayer) = build_parser(&filename);
-    println!("Before parsing");
+    // println!("Before parsing");
     let ast = parser.program().unwrap();
-    println!("After parsing");
-    // let cs = parser.get_input_stream();//.get_token_source();//.get_input_stream().unwrap();
-    // println!("{}", cs.get_text_from_interval(0, 12));
+    // println!("After parsing");
 
     if was_error.get() {
         return Err(ParseError);
