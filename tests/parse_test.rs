@@ -17,15 +17,19 @@ fn parse_file<P: AsRef<Path>>(filename: P) -> Result<(), ParseError> {
 
 #[test]
 fn lattests_parse() {
-    let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests/lattests");
+    let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
 
-    let bad_paths = ["bad/parse"];
+    let bad_paths = [
+        "lattests/bad/parse",
+        "wp/bad/parse",
+    ];
     let good_paths = [
-        "good",
-        "extensions/arrays1",
-        "extensions/objects1",
-        "extensions/objects2",
-        "extensions/struct",
+        "lattests/good",
+        "lattests/extensions/arrays1",
+        "lattests/extensions/objects1",
+        "lattests/extensions/objects2",
+        "lattests/extensions/struct",
+        "wp/good",
     ];
 
     let bad = bad_paths
