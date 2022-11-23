@@ -5,8 +5,8 @@ use antlr_rust::{
 use latte::frontend::parser::{
     build_parser,
     latteparser::{
-        AddOpContext, ArgContext, DeclContextAttrs, LatteParserContextType,
-        MulOpContext, ProgramContext, RelOpContext,
+        AddOpContext, ArgContext, DeclContextAttrs, LatteParserContextType, MulOpContext,
+        ProgramContext, RelOpContext,
     },
     lattevisitor::LatteVisitor,
     IntervalDisplayer,
@@ -92,10 +92,10 @@ impl<'a, 'input> LatteVisitor<'input> for Visitor {
     }
 
     fn visit_decl(&mut self, ctx: &latte::frontend::parser::latteparser::DeclContext<'input>) {
-        let interval = ctx.get_source_interval();
-        println!("Source interval: ({}, {})", interval.a, interval.b);
-        self.interval_displayer.display_interval(interval);
-        ctx.type_();
+        // let interval = ctx.get_source_interval();
+        // println!("Source interval: ({}, {})", interval.a, interval.b);
+        // self.interval_displayer.display_interval(interval);
+        // ctx.type_();
         self.visit_children(ctx)
     }
 
