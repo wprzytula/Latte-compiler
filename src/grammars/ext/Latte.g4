@@ -5,9 +5,9 @@ program
     ;
 
 topDef
-    : funDef                            # FnDef
-    | 'class' ID classBlock                  # BaseCls
-    | 'class' ID 'extends' ID classBlock     # DerivCls
+    : funDef                                # FnDef
+    | 'class' ID classBlock                 # BaseCls
+    | 'class' ID 'extends' ID classBlock    # DerivCls
     ;
 
 funDef
@@ -15,7 +15,7 @@ funDef
     ;
 
 arg
-    : type_ ID ( ',' type_ ID )*
+    : nonvoid_type ID ( ',' nonvoid_type ID )*
     ;
 
 classBlock
@@ -28,7 +28,7 @@ classItem
     ;
 
 decl
-    : type_ item ( ',' item )* ';'
+    : nonvoid_type item ( ',' item )* ';'
     ;
 
 item
@@ -41,19 +41,19 @@ block
     ;
 
 stmt
-    : ';'                                   # Empty
-    | block                                 # BlockStmt
-    | decl                                  # VarDecl
-    | lval '=' expr ';'                     # Ass
-    | lval '++' ';'                         # Incr
-    | lval '--' ';'                         # Decr
-    | 'return' expr ';'                     # Ret
-    | 'return' ';'                          # VRet
-    | 'if' '(' expr ')' stmt                # Cond
-    | 'if' '(' expr ')' stmt 'else' stmt    # CondElse
-    | 'while' '(' expr ')' stmt             # While
-    | expr ';'                              # SExp
-    | 'for' '(' type_ ID ':' expr ')' stmt  # For
+    : ';'                                           # Empty
+    | block                                         # BlockStmt
+    | decl                                          # VarDecl
+    | lval '=' expr ';'                             # Ass
+    | lval '++' ';'                                 # Incr
+    | lval '--' ';'                                 # Decr
+    | 'return' expr ';'                             # Ret
+    | 'return' ';'                                  # VRet
+    | 'if' '(' expr ')' stmt                        # Cond
+    | 'if' '(' expr ')' stmt 'else' stmt            # CondElse
+    | 'while' '(' expr ')' stmt                     # While
+    | expr ';'                                      # SExp
+    | 'for' '(' nonvoid_type ID ':' expr ')' stmt   # For
     ;
 
 lval
@@ -63,15 +63,19 @@ lval
     ;
 
 type_
-    : 'int'         # Int
-    | 'string'      # Str
-    | 'boolean'     # Bool
-    | 'void'        # Void
-    | type_ '[]'    # Arr
-    | ID            # Class
+    : 'void'        # Void
+    | nonvoid_type  # Nonvoid
+    ;
+    
+nonvoid_type
+    : 'int'             # Int
+    | 'string'          # Str
+    | 'boolean'         # Bool
+    | nonvoid_type '[]' # Arr
+    | ID                # Class
     ;
 
-newtype_
+newtype
     : 'int'                 # NInt
     | 'string'              # NStr
     | 'boolean'             # NBool
@@ -92,12 +96,12 @@ expr
     | 'false'                                                   # EFalse
     | ID '(' ( expr ( ',' expr )* )? ')'                        # EFunCall
     | STR                                                       # EStr
-    | '(' type_ ')' 'null'                                      # ENull
+    | '(' nonvoid_type ')' 'null'                               # ENull
     | '(' expr ')'                                              # EParen
     | <assoc=right> expr '[' expr ']'                           # EArrSub
     | <assoc=right> expr '.' ID                                 # EField
     | <assoc=right> expr '.' ID '(' ( expr ( ',' expr )* )? ')' # EMetCall
-    | 'new' newtype_                                            # ENew
+    | 'new' newtype                                            # ENew
     ;
 
 addOp

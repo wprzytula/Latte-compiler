@@ -12,11 +12,12 @@ use antlr_rust::interval_set::Interval;
 use antlr_rust::parser::ParserNodeType;
 use antlr_rust::recognizer::Recognizer;
 use antlr_rust::token_stream::TokenStream;
-use antlr_rust::{Parser, ErrorStrategy};
 use antlr_rust::{
     common_token_stream::CommonTokenStream, token_factory::CommonTokenFactory, InputStream,
 };
 use antlr_rust::{DefaultErrorStrategy, TokenSource};
+use antlr_rust::{ErrorStrategy, Parser};
+use better_any::{Tid, TidAble};
 pub use lattelexer::LatteLexer;
 pub use latteparser::LatteParser;
 use std::cell::{Cell, RefCell};
@@ -26,13 +27,10 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use better_any::{Tid, TidAble};
-
 
 use self::latteparser::ProgramContextAll;
 
 static TF: CommonTokenFactory = CommonTokenFactory;
-
 
 better_any::tid! { impl<'i,Ctx> TidAble<'i> for MyErrorStrategy<'i,Ctx> where Ctx: ParserNodeType<'i>}
 
@@ -114,8 +112,7 @@ pub fn build_parser<'f, P: AsRef<Path>>(
     >,
     Rc<Cell<bool>>,
     IntervalDisplayer,
-)
-{
+) {
     // println!("{}", path.as_ref().to_str().unwrap());
     let input = fs::read_to_string(path).expect("Something went wrong reading the file");
     let was_error = Rc::new(Cell::new(false));
