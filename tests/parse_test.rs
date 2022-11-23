@@ -19,10 +19,7 @@ fn parse_file<P: AsRef<Path>>(filename: P) -> Result<(), ParseError> {
 fn lattests_parse() {
     let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
 
-    let bad_paths = [
-        "lattests/bad/parse",
-        "wp/bad/parse",
-    ];
+    let bad_paths = ["lattests/bad/parse", "wp/bad/parse"];
     let good_paths = [
         "lattests/good",
         "lattests/extensions/arrays1",
