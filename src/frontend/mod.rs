@@ -1,2 +1,2 @@
-// pub mod semantic_analysis;
 pub mod parser;
+pub mod semantic_analysis;
