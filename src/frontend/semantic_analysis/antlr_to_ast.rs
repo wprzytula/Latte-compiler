@@ -462,7 +462,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         let expr = self.visit_children(ctx).into_expr().unwrap();
         let op = match ctx.get_text().chars().next().unwrap() {
             '!' => UnOpType::Not,
-            '-' => UnOpType::Not,
+            '-' => UnOpType::Neg,
             _ => unreachable!(),
         };
         Self::Return::Expr(Expr::Op(Op::UnOp(op, Box::new(expr))))
