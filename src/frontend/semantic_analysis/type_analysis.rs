@@ -31,7 +31,7 @@ pub enum TypeCheckError {
     #[error("")]
     WrongArgTypes {
         func: Ident,
-        expected: Vec<DataType>,
+        expected: Vec<NonvoidType>,
         actual: Vec<DataType>,
     },
 
@@ -84,16 +84,16 @@ pub enum TypeCheckError {
     VoidVariables(Stmt),
 
     #[error("")]
-    IncompatibleInitialization(Stmt, Expr, Ident, DataType, DataType),
+    IncompatibleInitialization(Stmt, Expr, Ident, NonvoidType, DataType),
 
     #[error("")]
-    IncompatibleAssignment(Stmt, Expr, Ident, DataType, DataType),
+    IncompatibleAssignment(Stmt, Expr, Ident, NonvoidType, DataType),
 
     #[error("")]
-    IncompatibleIncrementation(Stmt, Ident, DataType),
+    IncompatibleIncrementation(Stmt, Ident, NonvoidType),
 
     #[error("")]
-    IncompatibleDecrementation(Stmt, Ident, DataType),
+    IncompatibleDecrementation(Stmt, Ident, NonvoidType),
 
     #[error("")]
     UndefinedVariableAssignment(Stmt, Ident),
@@ -144,7 +144,7 @@ pub enum TypeCheckError {
     PossiblyUninitVariableAccess(Ident),
 
     #[error("")]
-    BadForElemType(DataType, DataType),
+    BadForElemType(NonvoidType, DataType),
 
     #[error("")]
     IntBinOpWrongType(Expr, DataType),
@@ -291,7 +291,7 @@ impl Stmt {
 
             Stmt::Incr(id) => {
                 let (var_type, init) = env.get_variable_type(id)?;
-                if !matches!(var_type, &DataType::TInt) {
+                if !matches!(var_type, &NonvoidType::TInt) {
                     return Err(TypeCheckError::IncompatibleIncrementation(
                         self.clone(),
                         id.clone(),
@@ -306,7 +306,7 @@ impl Stmt {
 
             Stmt::Decr(id) => {
                 let (var_type, init) = env.get_variable_type(id)?;
-                if !matches!(var_type, &DataType::TInt) {
+                if !matches!(var_type, &NonvoidType::TInt) {
                     return Err(TypeCheckError::IncompatibleDecrementation(
                         self.clone(),
                         id.clone(),
@@ -329,16 +329,20 @@ impl Stmt {
             Stmt::Cond(condition, body) | Stmt::While(condition, body) => {
                 let (cond_type, constval) = condition.type_check(env)?;
                 match (&cond_type, constval) {
-                    (DataType::TBoolean, None) => {
+                    (DataType::Nonvoid(NonvoidType::TBoolean), None) => {
                         let then_stmt_ret = body.type_check(env)?;
                         Ok(then_stmt_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
                     }
-                    (DataType::TBoolean, Some(Constexpr::Bool(true))) => body.type_check(env),
-                    (DataType::TBoolean, Some(Constexpr::Bool(false))) => Ok({
-                        body.type_check(env)?;
-                        None
-                    }),
-                    (DataType::TBoolean, _) => unreachable!(),
+                    (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(true))) => {
+                        body.type_check(env)
+                    }
+                    (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(false))) => {
+                        Ok({
+                            body.type_check(env)?;
+                            None
+                        })
+                    }
+                    (DataType::Nonvoid(NonvoidType::TBoolean), _) => unreachable!(),
                     _ => Err(TypeCheckError::WrongConditionType(
                         self.clone(),
                         condition.clone(),
@@ -352,7 +356,7 @@ impl Stmt {
                 let then_stmt_ret = then_stmt.type_check(env)?;
                 let else_stmt_ret = else_stmt.type_check(env)?;
                 match (&ret_type, constval) {
-                    (DataType::TBoolean, None) => {
+                    (DataType::Nonvoid(NonvoidType::TBoolean), None) => {
                         match (then_stmt_ret, else_stmt_ret) {
                             (None, None) => Ok(None),
                             (None, Some(ret_type)) | (Some(ret_type), None) => {
@@ -376,9 +380,13 @@ impl Stmt {
                             }
                         }
                     }
-                    (DataType::TBoolean, Some(Constexpr::Bool(true))) => Ok(then_stmt_ret),
-                    (DataType::TBoolean, Some(Constexpr::Bool(false))) => Ok(else_stmt_ret),
-                    (DataType::TBoolean, _) => unreachable!(),
+                    (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(true))) => {
+                        Ok(then_stmt_ret)
+                    }
+                    (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(false))) => {
+                        Ok(else_stmt_ret)
+                    }
+                    (DataType::Nonvoid(NonvoidType::TBoolean), _) => unreachable!(),
                     _ => Err(TypeCheckError::WrongConditionType(
                         self.clone(),
                         condition.clone(),
@@ -394,7 +402,7 @@ impl Stmt {
 
             Stmt::For(elem_type, elem_name, array_expr, body) => {
                 let (iterable_type, _) = array_expr.type_check(env)?;
-                if let DataType::TArr(ref x) = iterable_type {
+                if let DataType::Nonvoid(NonvoidType::TArr(ref x)) = iterable_type {
                     if **x != *elem_type {
                         return Err(TypeCheckError::BadForElemType(
                             elem_type.clone(),
@@ -413,20 +421,29 @@ impl Expr {
     fn type_check(&self, env: &Env) -> Result<(DataType, Option<Constexpr>), TypeCheckError> {
         // (type, consteval)
         match self {
-            Expr::IntLit(i) => Ok((DataType::TInt, Some(Constexpr::Int(*i)))),
+            Expr::IntLit(i) => Ok((
+                DataType::Nonvoid(NonvoidType::TInt),
+                Some(Constexpr::Int(*i)),
+            )),
 
-            Expr::BoolLit(b) => Ok((DataType::TInt, Some(Constexpr::Bool(*b)))),
+            Expr::BoolLit(b) => Ok((
+                DataType::Nonvoid(NonvoidType::TInt),
+                Some(Constexpr::Bool(*b)),
+            )),
 
-            Expr::StringLit(s) => Ok((DataType::TInt, Some(Constexpr::String(s.clone())))),
+            Expr::StringLit(s) => Ok((
+                DataType::Nonvoid(NonvoidType::TInt),
+                Some(Constexpr::String(s.clone())),
+            )),
 
             Expr::Op(op) => match op {
                 Op::UnOp(un_op_type, expr) => {
                     let (expr_type, constval) = expr.type_check(env)?;
                     match un_op_type {
                         UnOpType::Not => {
-                            if matches!(expr_type, DataType::TBoolean) {
+                            if matches!(expr_type, DataType::Nonvoid(NonvoidType::TBoolean)) {
                                 Ok((
-                                    DataType::TBoolean,
+                                    DataType::Nonvoid(NonvoidType::TBoolean),
                                     constval.map(|constval| {
                                         if let Constexpr::Bool(b) = constval {
                                             Constexpr::Bool(!b)
@@ -443,9 +460,9 @@ impl Expr {
                             }
                         }
                         UnOpType::Neg => {
-                            if matches!(expr_type, DataType::TInt) {
+                            if matches!(expr_type, DataType::Nonvoid(NonvoidType::TInt)) {
                                 Ok((
-                                    DataType::TInt,
+                                    DataType::Nonvoid(NonvoidType::TInt),
                                     constval.map(|constval| {
                                         if let Constexpr::Int(i) = constval {
                                             Constexpr::Int(-i)
@@ -470,7 +487,11 @@ impl Expr {
 
                     match bin_op_type {
                         BinOpType::IntOp(int_op) => {
-                            if let (&DataType::TInt, &DataType::TInt) = (&expr1_type, &expr2_type) {
+                            if let (
+                                &DataType::Nonvoid(NonvoidType::TInt),
+                                &DataType::Nonvoid(NonvoidType::TInt),
+                            ) = (&expr1_type, &expr2_type)
+                            {
                                 let constval_ret = match int_op {
                                     IntOpType::IntRet(int_ret_op) => {
                                         if let (
@@ -506,9 +527,9 @@ impl Expr {
                                         }
                                     }
                                 };
-                                Ok((DataType::TInt, constval_ret))
+                                Ok((DataType::Nonvoid(NonvoidType::TInt), constval_ret))
                             } else {
-                                if !matches!(expr1_type, DataType::TInt) {
+                                if !matches!(expr1_type, DataType::Nonvoid(NonvoidType::TInt)) {
                                     return Err(TypeCheckError::IntBinOpWrongType(
                                         expr1.deref().clone(),
                                         expr1_type,
@@ -523,9 +544,18 @@ impl Expr {
                         }
 
                         BinOpType::Eq | BinOpType::NEq => match (&expr1_type, &expr2_type) {
-                            (t @ &DataType::TInt, &DataType::TInt)
-                            | (t @ &DataType::TString, &DataType::TString)
-                            | (t @ &DataType::TBoolean, &DataType::TBoolean) => todo!(),
+                            (
+                                t @ &DataType::Nonvoid(NonvoidType::TInt),
+                                &DataType::Nonvoid(NonvoidType::TInt),
+                            )
+                            | (
+                                t @ &DataType::Nonvoid(NonvoidType::TString),
+                                &DataType::Nonvoid(NonvoidType::TString),
+                            )
+                            | (
+                                t @ &DataType::Nonvoid(NonvoidType::TBoolean),
+                                &DataType::Nonvoid(NonvoidType::TBoolean),
+                            ) => todo!(),
                             _ => Err(TypeCheckError::EqWrongTypes(
                                 expr1.deref().clone(),
                                 expr1_type,
@@ -541,7 +571,11 @@ impl Expr {
                     let (expr1_type, constval1) = expr1.type_check(env)?;
                     let (expr2_type, constval2) = expr2.type_check(env)?;
 
-                    if let (&DataType::TBoolean, &DataType::TBoolean) = (&expr1_type, &expr2_type) {
+                    if let (
+                        &DataType::Nonvoid(NonvoidType::TBoolean),
+                        &DataType::Nonvoid(NonvoidType::TBoolean),
+                    ) = (&expr1_type, &expr2_type)
+                    {
                         let constval_ret =
                             if let (Some(Constexpr::Bool(b1)), Some(Constexpr::Bool(b2))) =
                                 (constval1, constval2)
@@ -553,9 +587,9 @@ impl Expr {
                             } else {
                                 None
                             };
-                        Ok((DataType::TBoolean, constval_ret))
+                        Ok((DataType::Nonvoid(NonvoidType::TBoolean), constval_ret))
                     } else {
-                        if !matches!(expr1_type, DataType::TBoolean) {
+                        if !matches!(expr1_type, DataType::Nonvoid(NonvoidType::TBoolean)) {
                             return Err(TypeCheckError::LogOpWrongType(
                                 expr1.deref().clone(),
                                 expr1_type,
@@ -575,7 +609,7 @@ impl Expr {
                 if !initialised {
                     Err(TypeCheckError::PossiblyUninitVariableAccess(id.clone()))
                 } else {
-                    Ok((var_type.clone(), None))
+                    Ok((var_type.clone().into(), None))
                 }
             }
 
@@ -606,30 +640,30 @@ impl Expr {
 
             Expr::ArrSub(arr, idx) => {
                 let (arr_type, _) = arr.type_check(env)?;
-                let elt_type = if let DataType::TArr(inner_type) = arr_type {
+                let elt_type = if let DataType::Nonvoid(NonvoidType::TArr(inner_type)) = arr_type {
                     *inner_type
                 } else {
                     return Err(TypeCheckError::BadArrType(arr_type));
                 };
 
                 let (idx_type, _) = idx.type_check(env)?;
-                if !matches!(idx_type, DataType::TInt) {
+                if !matches!(idx_type, DataType::Nonvoid(NonvoidType::TInt)) {
                     return Err(TypeCheckError::BadArrIndex(idx_type));
                 }
 
-                Ok((elt_type, None))
+                Ok((elt_type.into(), None))
             }
 
             Expr::FieldAccess(object, field) => {
                 let (object_type, _) = object.type_check(env)?;
-                let class = if let DataType::Class(name) = object_type {
+                let class = if let DataType::Nonvoid(NonvoidType::Class(name)) = object_type {
                     name
                 } else {
                     return Err(TypeCheckError::NonObjectFieldAccess(object_type));
                 };
                 let field_type = env.get_field_type(class, field.clone())?;
 
-                Ok((field_type.clone(), None))
+                Ok((field_type.clone().into(), None))
             }
 
             Expr::MethodCall {
@@ -638,7 +672,7 @@ impl Expr {
                 args,
             } => {
                 let (object_type, _) = object.type_check(env)?;
-                let class = if let DataType::Class(name) = object_type {
+                let class = if let DataType::Nonvoid(NonvoidType::Class(name)) = object_type {
                     name
                 } else {
                     return Err(TypeCheckError::NonObjectFieldAccess(object_type));
@@ -669,15 +703,17 @@ impl Expr {
                 Ok((method.ret_type.clone(), None))
             }
 
-            Expr::Null(data_type) => Ok((data_type.clone(), Some(Constexpr::Null))),
+            Expr::Null(data_type) => Ok((data_type.clone().into(), Some(Constexpr::Null))),
 
             Expr::New(new_type) => {
                 let data_type = match new_type {
-                    NewType::TInt => DataType::TInt,
-                    NewType::TString => DataType::TString,
-                    NewType::TBoolean => DataType::TBoolean,
-                    NewType::Class(c) => DataType::Class(c.clone()),
-                    NewType::TArr(inner_type, _len) => DataType::TArr(inner_type.clone()),
+                    NewType::TInt => DataType::Nonvoid(NonvoidType::TInt),
+                    NewType::TString => DataType::Nonvoid(NonvoidType::TString),
+                    NewType::TBoolean => DataType::Nonvoid(NonvoidType::TBoolean),
+                    NewType::Class(c) => DataType::Nonvoid(NonvoidType::Class(c.clone())),
+                    NewType::TArr(inner_type, _len) => {
+                        DataType::Nonvoid(NonvoidType::TArr(inner_type.clone()))
+                    }
                 };
                 Ok((data_type, None))
             }
@@ -685,6 +721,6 @@ impl Expr {
     }
 }
 
-/* TODO: usage of a variable initialised in both if branches...
+/* TODO: usage of a variable initialised in both if branches...         -> done
         circular inheritance
 */

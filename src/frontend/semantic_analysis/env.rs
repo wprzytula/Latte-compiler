@@ -1,13 +1,13 @@
 use either::Either;
 use rpds::RedBlackTreeMap as Map;
 
-use super::ast::{DataType, Ident, RetType};
+use super::ast::{DataType, Ident, NonvoidType, RetType};
 
 use thiserror::Error;
 
 pub struct FunType {
     pub ret_type: RetType,
-    pub params: Vec<DataType>,
+    pub params: Vec<NonvoidType>,
 }
 
 enum Symbol {
@@ -56,11 +56,11 @@ enum EnvRun {
 pub struct Env {
     current_run: EnvRun,
     current_scope: u32,
-    variables: Map<Ident, (DataType, u32, bool)>, // name -> (type, scope declared, initialised)
-    functions: Map<Ident, FunType>,               // name -> type
-    classes: Map<Ident, Option<Ident>>,           // class -> base class
-    fields: Map<(Ident, Ident), DataType>,        // (class, field) -> type
-    methods: Map<(Ident, Ident), FunType>,        // (class, method) -> type
+    variables: Map<Ident, (NonvoidType, u32, bool)>, // name -> (type, scope declared, initialised)
+    functions: Map<Ident, FunType>,                  // name -> type
+    classes: Map<Ident, Option<Ident>>,              // class -> base class
+    fields: Map<(Ident, Ident), NonvoidType>,        // (class, field) -> type
+    methods: Map<(Ident, Ident), FunType>,           // (class, method) -> type
 }
 
 impl Env {
@@ -96,7 +96,7 @@ impl Env {
     pub fn declare_variable(
         &mut self,
         id: Ident,
-        data_type: DataType,
+        data_type: NonvoidType,
         initialised: bool,
     ) -> Result<(), DoubleDeclarationError> {
         if let Some((_, scope, _)) = self.variables.get(&id) {
@@ -120,7 +120,7 @@ impl Env {
     pub fn get_variable_type(
         &self,
         id: &Ident,
-    ) -> Result<(&DataType, bool), MissingDeclarationError> {
+    ) -> Result<(&NonvoidType, bool), MissingDeclarationError> {
         self.variables
             .get(&id)
             .map(|type_scope_init| (&type_scope_init.0, type_scope_init.2))
@@ -176,7 +176,7 @@ impl Env {
         &mut self,
         class: Ident,
         id: Ident,
-        data_type: DataType,
+        data_type: NonvoidType,
     ) -> Result<(), DoubleDeclarationError> {
         let class_id = (class, id);
         if self.fields.get(&(class_id)).is_some() {
@@ -190,7 +190,7 @@ impl Env {
         &self,
         class: Ident,
         id: Ident,
-    ) -> Result<&DataType, MissingDeclarationError> {
+    ) -> Result<&NonvoidType, MissingDeclarationError> {
         let class_id = (class, id);
         self.fields
             .get(&class_id)

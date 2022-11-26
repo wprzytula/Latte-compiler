@@ -3,10 +3,12 @@ use std::{
     rc::Rc,
 };
 
+#[derive(Debug)]
 pub struct Program(pub Vec<TopDef>);
 
 pub type Int = i64;
 
+#[derive(Debug)]
 pub enum TopDef {
     FunDef(FunDef),
     Class(Ident, Option<Ident>, ClassBlock), // (class, base_class, block)
@@ -22,12 +24,14 @@ pub struct FunDef {
 
 #[derive(Clone, Debug)]
 pub struct Arg {
-    pub type_: DataType,
+    pub type_: NonvoidType,
     pub name: Ident,
 }
 
+#[derive(Debug)]
 pub struct ClassBlock(pub Vec<ClassItem>);
 
+#[derive(Debug)]
 pub enum ClassItem {
     Decl(VarDecl),
     FunDef(FunDef),
@@ -35,7 +39,7 @@ pub enum ClassItem {
 
 #[derive(Debug, Clone)]
 pub struct VarDecl {
-    pub type_: DataType,
+    pub type_: NonvoidType,
     pub name: Ident,
     pub init: Option<Expr>,
 }
@@ -57,7 +61,7 @@ pub enum Stmt {
     CondElse(Expr, Box<Stmt>, Box<Stmt>),
     While(Expr, Box<Stmt>),
     SExp(Expr),
-    For(DataType, Ident, Expr, Box<Stmt>), // (elem_type, elem_name, array_expr, body)
+    For(NonvoidType, Ident, Expr, Box<Stmt>), // (elem_type, elem_name, array_expr, body)
 }
 
 pub enum LVal {
@@ -67,13 +71,40 @@ pub enum LVal {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DataType {
+pub enum NonvoidType {
     TInt,
     TString,
     TBoolean,
-    TVoid,
-    TArr(Box<DataType>),
+    TArr(Box<NonvoidType>),
     Class(Ident),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DataType {
+    TVoid,
+    Nonvoid(NonvoidType),
+}
+
+impl From<NonvoidType> for DataType {
+    fn from(nonvoid: NonvoidType) -> Self {
+        Self::Nonvoid(nonvoid)
+    }
+}
+
+impl PartialEq<DataType> for NonvoidType {
+    fn eq(&self, other: &DataType) -> bool {
+        if let DataType::Nonvoid(nonvoid) = other {
+            nonvoid == other
+        } else {
+            false
+        }
+    }
+}
+
+impl PartialEq<NonvoidType> for DataType {
+    fn eq(&self, other: &NonvoidType) -> bool {
+        other.eq(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +112,7 @@ pub enum NewType {
     TInt,
     TString,
     TBoolean,
-    TArr(Box<DataType>, Int),
+    TArr(Box<NonvoidType>, Int),
     Class(Ident),
 }
 
@@ -154,7 +185,7 @@ pub enum Expr {
         method_name: Ident,
         args: Vec<Box<Expr>>,
     },
-    Null(DataType),
+    Null(NonvoidType),
     New(NewType),
 }
 
