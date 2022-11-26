@@ -1,3 +1,4 @@
+use smallvec::SmallVec;
 use std::{
     fmt::{self, Display},
     rc::Rc,
@@ -18,12 +19,12 @@ pub enum TopDef {
 pub struct FunDef {
     pub ret_type: DataType,
     pub name: Ident,
-    pub args: Vec<Arg>,
+    pub params: Vec<Param>,
     pub block: Block,
 }
 
 #[derive(Clone, Debug)]
-pub struct Arg {
+pub struct Param {
     pub type_: NonvoidType,
     pub name: Ident,
 }
@@ -33,15 +34,20 @@ pub struct ClassBlock(pub Vec<ClassItem>);
 
 #[derive(Debug)]
 pub enum ClassItem {
-    Decl(VarDecl),
+    Decl(DataDecl),
     FunDef(FunDef),
 }
 
 #[derive(Debug, Clone)]
-pub struct VarDecl {
-    pub type_: NonvoidType,
+pub struct SingleDecl {
     pub name: Ident,
     pub init: Option<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DataDecl {
+    pub type_: NonvoidType,
+    pub decls: SmallVec<[SingleDecl; 3]>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,10 +57,10 @@ pub struct Block(pub Vec<Stmt>);
 pub enum Stmt {
     Empty,
     Block(Block),
-    VarDecl(VarDecl),
-    Ass(Ident, Expr),
-    Incr(Ident),
-    Decr(Ident),
+    VarDecl(DataDecl),
+    Ass(LVal, Expr),
+    Incr(LVal),
+    Decr(LVal),
     Return(Expr),
     VoidReturn,
     Cond(Expr, Box<Stmt>),
@@ -64,6 +70,7 @@ pub enum Stmt {
     For(NonvoidType, Ident, Expr, Box<Stmt>), // (elem_type, elem_name, array_expr, body)
 }
 
+#[derive(Debug, Clone)]
 pub enum LVal {
     Id(Ident),
     LField(Box<LVal>, Ident),

@@ -87,7 +87,7 @@ pub enum TypeCheckError {
     IncompatibleInitialization(Stmt, Expr, Ident, NonvoidType, DataType),
 
     #[error("")]
-    IncompatibleAssignment(Stmt, Expr, Ident, NonvoidType, DataType),
+    IncompatibleAssignment(Stmt, Expr, LVal, NonvoidType, DataType),
 
     #[error("")]
     IncompatibleIncrementation(Stmt, Ident, NonvoidType),
@@ -273,19 +273,20 @@ impl Stmt {
                 Ok(None)
             }
 
-            Stmt::Ass(id, expr) => {
+            Stmt::Ass(lval, expr) => {
                 let (expr_type, _) = expr.type_check(env)?;
-                let (var_type, _) = env.get_variable_type(id)?;
-                if expr_type == *var_type {
+                let lval_type = lval.type_check(env)?;
+                
+                if expr_type == lval_type {
                     return Err(TypeCheckError::IncompatibleAssignment(
                         self.clone(),
                         expr.clone(),
-                        id.clone(),
-                        var_type.clone(),
+                        lval.clone(),
+                        lval_type,
                         expr_type,
                     ));
                 }
-                env.init_variable(id)?;
+                // env.init_variable(id)?; // FIXME
                 Ok(None)
             }
 
@@ -413,6 +414,16 @@ impl Stmt {
                 let body_ret = body.type_check(&mut env.new_scope())?;
                 Ok(body_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
             }
+        }
+    }
+}
+
+impl LVal {
+    fn type_check(&self, env: &Env) -> Result<NonvoidType, TypeCheckError> {
+        match self {
+            LVal::Id(id) => Ok(env.get_variable_type(id)?.0.clone()),
+            LVal::LField(_, _) => todo!(),
+            LVal::LArr(_, _) => todo!(),
         }
     }
 }
@@ -721,6 +732,7 @@ impl Expr {
     }
 }
 
-/* TODO: usage of a variable initialised in both if branches...         -> done
+/* TODO: usage of a variable initialised in both if branches...
         circular inheritance
+        associativity
 */

@@ -1,6 +1,6 @@
 use std::{fs::read_dir, iter::repeat, path::Path};
 
-use latte::frontend::parser::build_parser;
+use latte::frontend::{parser::build_parser, semantic_analysis::Program};
 
 #[derive(Debug)]
 struct ParseError;
@@ -12,6 +12,8 @@ fn parse_file<P: AsRef<Path>>(filename: P) -> Result<(), ParseError> {
     if was_error.get() {
         return Err(ParseError);
     }
+    let _program = Program::from(ast);
+
     Ok(())
 }
 
