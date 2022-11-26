@@ -90,19 +90,19 @@ pub enum TypeCheckError {
     IncompatibleAssignment(Stmt, Expr, LVal, NonvoidType, DataType),
 
     #[error("")]
-    IncompatibleIncrementation(Stmt, Ident, NonvoidType),
+    IncompatibleIncrementation(Stmt, LVal, NonvoidType),
 
     #[error("")]
-    IncompatibleDecrementation(Stmt, Ident, NonvoidType),
+    IncompatibleDecrementation(Stmt, LVal, NonvoidType),
 
     #[error("")]
-    UndefinedVariableAssignment(Stmt, Ident),
+    UndefinedVariableAssignment(Stmt, LVal),
 
     #[error("")]
-    UndefinedVariableIncrementation(Stmt, Ident),
+    UndefinedVariableIncrementation(Stmt, LVal),
 
     #[error("")]
-    UndefinedVariableDecrementation(Stmt, Ident),
+    UndefinedVariableDecrementation(Stmt, LVal),
 
     #[error("")]
     WrongConditionType(Stmt, Expr, DataType),
@@ -132,13 +132,19 @@ pub enum TypeCheckError {
     },
 
     #[error("")]
-    IncompatibleRetTypesInBlock(Stmt, StmtRetType, Block, StmtRetType), // FIXME
+    IncompatibleRetTypesInBlock(Stmt, StmtRetType, Block, StmtRetType), // FIXME: particular Stmt is against generalised Block (no explicit offensor)
+
+    #[error("")]
+    IncompatibleRetTypesInFunction(FunDef, DataType, Block, StmtRetType),
 
     #[error(transparent)] // FIXME
     MissingDeclaration(#[from] MissingDeclarationError),
 
     #[error("")]
     DoubleDeclaration(#[from] DoubleDeclarationError),
+
+    #[error("")]
+    PossiblyUninitAccess(LVal),
 
     #[error("")]
     PossiblyUninitVariableAccess(Ident),
@@ -200,17 +206,29 @@ impl PartialEq for Constexpr {
 }
 
 impl Program {
-    fn type_check(&self, env: &mut Env) -> Result<(), TypeCheckError> {
+    pub fn type_check(&self) -> Result<(), TypeCheckError> {
+        let mut initial_env = Env::new();
+        initial_env.declare_function("printInt".to_owned().into(), FunType {
+             ret_type: DataType::Nonvoid(NonvoidType::TInt),
+              params: vec![NonvoidType::TInt]
+        })?;
+        initial_env.declare_function("printBoolean".to_owned().into(), FunType {
+            ret_type: DataType::Nonvoid(NonvoidType::TBoolean),
+             params: vec![NonvoidType::TBoolean]
+        })?;
+        initial_env.declare_function("printString".to_owned().into(), FunType {
+            ret_type: DataType::Nonvoid(NonvoidType::TString),
+             params: vec![NonvoidType::TString]
+        })?;
+
+        self.type_check_with_env(&mut initial_env)
+    }
+
+    fn type_check_with_env(&self, env: &mut Env) -> Result<(), TypeCheckError> {
         // First run
         for top_def in self.0.iter() {
             match top_def {
-                TopDef::FunDef(fun_def) => {
-                    let fun_type = FunType {
-                        ret_type: fun_def.ret_type.clone(),
-                        params: fun_def.args.iter().map(|arg| arg.type_.clone()).collect(),
-                    };
-                    env.declare_function(fun_def.name.clone(), fun_type)?;
-                }
+                TopDef::FunDef(fun_def) => fun_def.type_check(env)?,
                 TopDef::Class(id, base_id, class_block) => {
                     env.declare_class(id.clone(), base_id.clone())?;
                 }
@@ -220,8 +238,35 @@ impl Program {
     }
 }
 
+impl FunDef {
+    fn type_check(&self, env: &mut Env) -> Result<(), TypeCheckError> {
+        let fun_type = FunType {
+            ret_type: self.ret_type.clone(),
+            params: self.params.iter().map(|arg| arg.type_.clone()).collect(),
+        };
+        env.declare_function(self.name.clone(), fun_type)?;
+
+        let body_ret_type = self.block.type_check(env)?;
+        match (&self.ret_type, &body_ret_type) {
+            (&DataType::TVoid, &None) | (&DataType::TVoid, &Some((DataType::TVoid, _))) => Ok(()), // Void return fulfilled
+            (&DataType::Nonvoid(ref expected), &Some((DataType::Nonvoid(ref actual), true))) if expected == actual => Ok(()), // Matching nonvoid return
+            (&DataType::Nonvoid(_), &None) | // Expected Nonvoid return, got void
+            (&DataType::Nonvoid(_), &Some((_, false))) | // Expected Nonvoid return, got possible void
+            (&DataType::TVoid, _) | // Expected Void return, got possible different
+            (_, _) // All other cases (incompatible types, etc.)
+            => Err(TypeCheckError::IncompatibleRetTypesInFunction(
+                self.clone(),
+                self.ret_type.clone(),
+                self.block.clone(),
+                body_ret_type,
+            )),
+        }
+    }
+}
+
 impl Block {
     fn type_check(&self, env: &mut Env) -> Result<StmtRetType, TypeCheckError> {
+        eprintln!("type checking block: {:#?}", self);
         let mut block_ret_type = None;
         for stmt in &self.0 {
             let stmt_ret_type = stmt.type_check(env)?;
@@ -248,6 +293,7 @@ impl Block {
 
 impl Stmt {
     fn type_check(&self, env: &mut Env) -> Result<StmtRetType, TypeCheckError> {
+        eprintln!("type checking stmt: {:#?}", self);
         match self {
             Stmt::Empty => Ok(None),
 
@@ -257,65 +303,70 @@ impl Stmt {
             }
 
             Stmt::VarDecl(decl) => {
-                if let Some(ref init_expr) = decl.init {
-                    let (init_type, _) = init_expr.type_check(env)?;
-                    if init_type != decl.type_ {
-                        return Err(TypeCheckError::IncompatibleInitialization(
-                            self.clone(),
-                            init_expr.clone(),
-                            decl.name.clone(),
-                            decl.type_.clone(),
-                            init_type,
-                        ));
+                for single_decl in decl.decls.iter() {
+                    if let Some(ref init_expr) = single_decl.init {
+                        let (init_type, _) = init_expr.type_check(env)?;
+                        if init_type != decl.type_ {
+                            return Err(TypeCheckError::IncompatibleInitialization(
+                                self.clone(),
+                                init_expr.clone(),
+                                single_decl.name.clone(),
+                                decl.type_.clone(),
+                                init_type,
+                            ));
+                        }
                     }
+                    env.declare_variable(
+                        single_decl.name.clone(),
+                        decl.type_.clone(),
+                        single_decl.init.is_some(),
+                    )?;
                 }
-                env.declare_variable(decl.name.clone(), decl.type_.clone(), decl.init.is_some())?;
                 Ok(None)
             }
 
             Stmt::Ass(lval, expr) => {
                 let (expr_type, _) = expr.type_check(env)?;
-                let lval_type = lval.type_check(env)?;
-                
-                if expr_type == lval_type {
+                let (lval_type, _was_init) = lval.type_check_and_make_init(env)?;
+
+                if expr_type != *lval_type {
                     return Err(TypeCheckError::IncompatibleAssignment(
                         self.clone(),
                         expr.clone(),
                         lval.clone(),
-                        lval_type,
+                        lval_type.clone(),
                         expr_type,
                     ));
                 }
-                // env.init_variable(id)?; // FIXME
                 Ok(None)
             }
 
-            Stmt::Incr(id) => {
-                let (var_type, init) = env.get_variable_type(id)?;
-                if !matches!(var_type, &NonvoidType::TInt) {
+            Stmt::Incr(lval) => {
+                let (lval_type, init) = lval.type_check_and_get_is_init(env)?;
+                if !matches!(lval_type, NonvoidType::TInt) {
                     return Err(TypeCheckError::IncompatibleIncrementation(
                         self.clone(),
-                        id.clone(),
-                        var_type.clone(),
+                        lval.clone(),
+                        lval_type.clone(),
                     ));
                 }
                 if !init {
-                    return Err(TypeCheckError::PossiblyUninitVariableAccess(id.clone()));
+                    return Err(TypeCheckError::PossiblyUninitAccess(lval.clone()));
                 }
                 Ok(None)
             }
 
-            Stmt::Decr(id) => {
-                let (var_type, init) = env.get_variable_type(id)?;
-                if !matches!(var_type, &NonvoidType::TInt) {
+            Stmt::Decr(lval) => {
+                let (lval_type, init) = lval.type_check_and_get_is_init(env)?;
+                if !matches!(lval_type, NonvoidType::TInt) {
                     return Err(TypeCheckError::IncompatibleDecrementation(
                         self.clone(),
-                        id.clone(),
-                        var_type.clone(),
+                        lval.clone(),
+                        lval_type.clone(),
                     ));
                 }
                 if !init {
-                    return Err(TypeCheckError::PossiblyUninitVariableAccess(id.clone()));
+                    return Err(TypeCheckError::PossiblyUninitAccess(lval.clone()));
                 }
                 Ok(None)
             }
@@ -419,9 +470,27 @@ impl Stmt {
 }
 
 impl LVal {
-    fn type_check(&self, env: &Env) -> Result<NonvoidType, TypeCheckError> {
+    fn type_check_and_make_init<'env>(
+        &self,
+        env: &'env mut Env,
+    ) -> Result<(&'env NonvoidType, bool), TypeCheckError> {
+        // (type, prev_init)
         match self {
-            LVal::Id(id) => Ok(env.get_variable_type(id)?.0.clone()),
+            LVal::Id(id) => env
+                .get_variable_type_and_make_init(id)
+                .map_err(|e| e.into()),
+            LVal::LField(_, _) => todo!(),
+            LVal::LArr(_, _) => todo!(),
+        }
+    }
+
+    fn type_check_and_get_is_init<'env>(
+        &self,
+        env: &'env Env,
+    ) -> Result<(&'env NonvoidType, bool), TypeCheckError> {
+        // (type, init)
+        match self {
+            LVal::Id(id) => env.get_variable_type_and_is_init(id).map_err(|e| e.into()),
             LVal::LField(_, _) => todo!(),
             LVal::LArr(_, _) => todo!(),
         }
@@ -431,6 +500,7 @@ impl LVal {
 impl Expr {
     fn type_check(&self, env: &Env) -> Result<(DataType, Option<Constexpr>), TypeCheckError> {
         // (type, consteval)
+        eprintln!("type checking expr: {:#?}", self);
         match self {
             Expr::IntLit(i) => Ok((
                 DataType::Nonvoid(NonvoidType::TInt),
@@ -438,12 +508,12 @@ impl Expr {
             )),
 
             Expr::BoolLit(b) => Ok((
-                DataType::Nonvoid(NonvoidType::TInt),
+                DataType::Nonvoid(NonvoidType::TBoolean),
                 Some(Constexpr::Bool(*b)),
             )),
 
             Expr::StringLit(s) => Ok((
-                DataType::Nonvoid(NonvoidType::TInt),
+                DataType::Nonvoid(NonvoidType::TString),
                 Some(Constexpr::String(s.clone())),
             )),
 
@@ -554,27 +624,41 @@ impl Expr {
                             }
                         }
 
-                        BinOpType::Eq | BinOpType::NEq => match (&expr1_type, &expr2_type) {
-                            (
-                                t @ &DataType::Nonvoid(NonvoidType::TInt),
-                                &DataType::Nonvoid(NonvoidType::TInt),
-                            )
-                            | (
-                                t @ &DataType::Nonvoid(NonvoidType::TString),
-                                &DataType::Nonvoid(NonvoidType::TString),
-                            )
-                            | (
-                                t @ &DataType::Nonvoid(NonvoidType::TBoolean),
-                                &DataType::Nonvoid(NonvoidType::TBoolean),
-                            ) => todo!(),
-                            _ => Err(TypeCheckError::EqWrongTypes(
-                                expr1.deref().clone(),
-                                expr1_type,
-                                bin_op_type.clone(),
-                                expr2.deref().clone(),
-                                expr2_type,
-                            )),
-                        },
+                        op @ BinOpType::Eq | op @ BinOpType::NEq => {
+                            match (&expr1_type, &expr2_type) {
+                                (
+                                    t @ &DataType::Nonvoid(NonvoidType::TInt),
+                                    &DataType::Nonvoid(NonvoidType::TInt),
+                                )
+                                | (
+                                    t @ &DataType::Nonvoid(NonvoidType::TString),
+                                    &DataType::Nonvoid(NonvoidType::TString),
+                                )
+                                | (
+                                    t @ &DataType::Nonvoid(NonvoidType::TBoolean),
+                                    &DataType::Nonvoid(NonvoidType::TBoolean),
+                                ) => {
+                                    let constval = if constval1.is_some() && constval2.is_some() {
+                                        Some(Constexpr::Bool(if matches!(op, BinOpType::Eq) {
+                                            constval1 == constval2
+                                        } else {
+                                            // BinOpType::NEq
+                                            constval1 != constval2
+                                        }))
+                                    } else {
+                                        None
+                                    };
+                                    Ok((t.clone(), constval))
+                                }
+                                _ => Err(TypeCheckError::EqWrongTypes(
+                                    expr1.deref().clone(),
+                                    expr1_type,
+                                    bin_op_type.clone(),
+                                    expr2.deref().clone(),
+                                    expr2_type,
+                                )),
+                            }
+                        }
                     }
                 }
 
@@ -616,7 +700,7 @@ impl Expr {
             },
 
             Expr::Id(id) => {
-                let (var_type, initialised) = env.get_variable_type(id)?;
+                let (var_type, initialised) = env.get_variable_type_and_is_init(id)?;
                 if !initialised {
                     Err(TypeCheckError::PossiblyUninitVariableAccess(id.clone()))
                 } else {
@@ -625,7 +709,7 @@ impl Expr {
             }
 
             Expr::FunCall { name, args } => {
-                let func = env.get_function_type(name)?;
+                let func = env.get_function_type(name)?.clone();
                 if args.len() != func.params.len() {
                     return Err(TypeCheckError::WrongFuncArgNum {
                         func: name.clone(),

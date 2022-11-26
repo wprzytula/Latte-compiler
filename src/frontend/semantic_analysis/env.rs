@@ -1,7 +1,7 @@
 use either::Either;
 use rpds::RedBlackTreeMap as Map;
 
-use super::ast::{DataType, Ident, NonvoidType, RetType};
+use super::ast::{Ident, NonvoidType, RetType};
 
 use thiserror::Error;
 
@@ -117,13 +117,27 @@ impl Env {
         Ok(())
     }
 
-    pub fn get_variable_type(
+    pub fn get_variable_type_and_is_init(
         &self,
         id: &Ident,
     ) -> Result<(&NonvoidType, bool), MissingDeclarationError> {
         self.variables
             .get(&id)
             .map(|type_scope_init| (&type_scope_init.0, type_scope_init.2))
+            .ok_or(MissingDeclarationError::Var(id.clone()))
+    }
+
+    pub fn get_variable_type_and_make_init(
+        &mut self,
+        id: &Ident,
+    ) -> Result<(&NonvoidType, bool), MissingDeclarationError> {
+        self.variables
+            .get_mut(&id)
+            .map(|type_scope_init| {
+                let prev_init = type_scope_init.2;
+                type_scope_init.2 = true;
+                (&type_scope_init.0, prev_init)
+            })
             .ok_or(MissingDeclarationError::Var(id.clone()))
     }
 
