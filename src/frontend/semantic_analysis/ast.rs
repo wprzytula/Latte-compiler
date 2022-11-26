@@ -15,7 +15,7 @@ pub enum TopDef {
     Class(Ident, Option<Ident>, ClassBlock), // (class, base_class, block)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunDef {
     pub ret_type: DataType,
     pub name: Ident,
@@ -101,7 +101,7 @@ impl From<NonvoidType> for DataType {
 impl PartialEq<DataType> for NonvoidType {
     fn eq(&self, other: &DataType) -> bool {
         if let DataType::Nonvoid(nonvoid) = other {
-            nonvoid == other
+            self == nonvoid
         } else {
             false
         }
