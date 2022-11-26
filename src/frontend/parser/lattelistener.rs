@@ -15,17 +15,17 @@ pub trait LatteListener<'input>: ParseTreeListener<'input, LatteParserContextTyp
      */
     fn exit_program(&mut self, _ctx: &ProgramContext<'input>) {}
     /**
-     * Enter a parse tree produced by the {@code FnDef}
+     * Enter a parse tree produced by the {@code TopFnDef}
      * labeled alternative in {@link LatteParser#topDef}.
      * @param ctx the parse tree
      */
-    fn enter_FnDef(&mut self, _ctx: &FnDefContext<'input>) {}
+    fn enter_TopFnDef(&mut self, _ctx: &TopFnDefContext<'input>) {}
     /**
-     * Exit a parse tree produced by the {@code FnDef}
+     * Exit a parse tree produced by the {@code TopFnDef}
      * labeled alternative in {@link LatteParser#topDef}.
      * @param ctx the parse tree
      */
-    fn exit_FnDef(&mut self, _ctx: &FnDefContext<'input>) {}
+    fn exit_TopFnDef(&mut self, _ctx: &TopFnDefContext<'input>) {}
     /**
      * Enter a parse tree produced by the {@code BaseCls}
      * labeled alternative in {@link LatteParser#topDef}.
@@ -61,15 +61,25 @@ pub trait LatteListener<'input>: ParseTreeListener<'input, LatteParserContextTyp
      */
     fn exit_funDef(&mut self, _ctx: &FunDefContext<'input>) {}
     /**
-     * Enter a parse tree produced by {@link LatteParser#arg}.
+     * Enter a parse tree produced by {@link LatteParser#params}.
      * @param ctx the parse tree
      */
-    fn enter_arg(&mut self, _ctx: &ArgContext<'input>) {}
+    fn enter_params(&mut self, _ctx: &ParamsContext<'input>) {}
     /**
-     * Exit a parse tree produced by {@link LatteParser#arg}.
+     * Exit a parse tree produced by {@link LatteParser#params}.
      * @param ctx the parse tree
      */
-    fn exit_arg(&mut self, _ctx: &ArgContext<'input>) {}
+    fn exit_params(&mut self, _ctx: &ParamsContext<'input>) {}
+    /**
+     * Enter a parse tree produced by {@link LatteParser#param}.
+     * @param ctx the parse tree
+     */
+    fn enter_param(&mut self, _ctx: &ParamContext<'input>) {}
+    /**
+     * Exit a parse tree produced by {@link LatteParser#param}.
+     * @param ctx the parse tree
+     */
+    fn exit_param(&mut self, _ctx: &ParamContext<'input>) {}
     /**
      * Enter a parse tree produced by {@link LatteParser#classBlock}.
      * @param ctx the parse tree
@@ -115,15 +125,39 @@ pub trait LatteListener<'input>: ParseTreeListener<'input, LatteParserContextTyp
      */
     fn exit_decl(&mut self, _ctx: &DeclContext<'input>) {}
     /**
-     * Enter a parse tree produced by {@link LatteParser#item}.
+     * Enter a parse tree produced by {@link LatteParser#items}.
      * @param ctx the parse tree
      */
-    fn enter_item(&mut self, _ctx: &ItemContext<'input>) {}
+    fn enter_items(&mut self, _ctx: &ItemsContext<'input>) {}
     /**
-     * Exit a parse tree produced by {@link LatteParser#item}.
+     * Exit a parse tree produced by {@link LatteParser#items}.
      * @param ctx the parse tree
      */
-    fn exit_item(&mut self, _ctx: &ItemContext<'input>) {}
+    fn exit_items(&mut self, _ctx: &ItemsContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code DeclItemUninit}
+     * labeled alternative in {@link LatteParser#item}.
+     * @param ctx the parse tree
+     */
+    fn enter_DeclItemUninit(&mut self, _ctx: &DeclItemUninitContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code DeclItemUninit}
+     * labeled alternative in {@link LatteParser#item}.
+     * @param ctx the parse tree
+     */
+    fn exit_DeclItemUninit(&mut self, _ctx: &DeclItemUninitContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code DeclItemInit}
+     * labeled alternative in {@link LatteParser#item}.
+     * @param ctx the parse tree
+     */
+    fn enter_DeclItemInit(&mut self, _ctx: &DeclItemInitContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code DeclItemInit}
+     * labeled alternative in {@link LatteParser#item}.
+     * @param ctx the parse tree
+     */
+    fn exit_DeclItemInit(&mut self, _ctx: &DeclItemInitContext<'input>) {}
     /**
      * Enter a parse tree produced by {@link LatteParser#block}.
      * @param ctx the parse tree
@@ -686,6 +720,26 @@ pub trait LatteListener<'input>: ParseTreeListener<'input, LatteParserContextTyp
      * @param ctx the parse tree
      */
     fn exit_EField(&mut self, _ctx: &EFieldContext<'input>) {}
+    /**
+     * Enter a parse tree produced by {@link LatteParser#args}.
+     * @param ctx the parse tree
+     */
+    fn enter_args(&mut self, _ctx: &ArgsContext<'input>) {}
+    /**
+     * Exit a parse tree produced by {@link LatteParser#args}.
+     * @param ctx the parse tree
+     */
+    fn exit_args(&mut self, _ctx: &ArgsContext<'input>) {}
+    /**
+     * Enter a parse tree produced by {@link LatteParser#arg}.
+     * @param ctx the parse tree
+     */
+    fn enter_arg(&mut self, _ctx: &ArgContext<'input>) {}
+    /**
+     * Exit a parse tree produced by {@link LatteParser#arg}.
+     * @param ctx the parse tree
+     */
+    fn exit_arg(&mut self, _ctx: &ArgContext<'input>) {}
     /**
      * Enter a parse tree produced by {@link LatteParser#addOp}.
      * @param ctx the parse tree

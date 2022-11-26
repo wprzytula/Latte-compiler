@@ -5,17 +5,22 @@ program
     ;
 
 topDef
-    : funDef                                # FnDef
+    : funDef                                # TopFnDef
     | 'class' ID classBlock                 # BaseCls
     | 'class' ID 'extends' ID classBlock    # DerivCls
     ;
 
 funDef
-    : type_ ID '(' arg? ')' block
+    : type_ ID '(' params ')' block
     ;
 
-arg
-    : nonvoid_type ID ( ',' nonvoid_type ID )*
+params
+    : param ( ',' param )*
+    | /* no params */
+    ;
+
+param
+    : nonvoid_type ID
     ;
 
 classBlock
@@ -28,12 +33,16 @@ classItem
     ;
 
 decl
-    : nonvoid_type item ( ',' item )* ';'
+    : nonvoid_type items ';'
     ;
 
+items
+    : item ( ',' item )*
+    ;
+    
 item
-    : ID
-    | ID '=' expr
+    : ID                                # DeclItemUninit
+    | ID '=' expr                       # DeclItemInit
     ;
 
 block
@@ -84,24 +93,33 @@ newtype
     ;
 
 expr
-    : ('-'|'!') expr                                            # EUnOp
-    | expr mulOp expr                                           # EMulOp
-    | expr addOp expr                                           # EAddOp
-    | expr relOp expr                                           # ERelOp
-    | <assoc=right> expr '&&' expr                              # EAnd
-    | <assoc=right> expr '||' expr                              # EOr
-    | ID                                                        # EId
-    | INT                                                       # EInt
-    | 'true'                                                    # ETrue
-    | 'false'                                                   # EFalse
-    | ID '(' ( expr ( ',' expr )* )? ')'                        # EFunCall
-    | STR                                                       # EStr
-    | '(' nonvoid_type ')' 'null'                               # ENull
-    | '(' expr ')'                                              # EParen
-    | <assoc=right> expr '[' expr ']'                           # EArrSub
-    | <assoc=right> expr '.' ID                                 # EField
-    | <assoc=right> expr '.' ID '(' ( expr ( ',' expr )* )? ')' # EMetCall
-    | 'new' newtype                                            # ENew
+    : ('-'|'!') expr                            # EUnOp
+    | expr mulOp expr                           # EMulOp
+    | expr addOp expr                           # EAddOp
+    | expr relOp expr                           # ERelOp
+    | <assoc=right> expr '&&' expr              # EAnd
+    | <assoc=right> expr '||' expr              # EOr
+    | ID                                        # EId
+    | INT                                       # EInt
+    | 'true'                                    # ETrue
+    | 'false'                                   # EFalse
+    | ID '(' args ')'                           # EFunCall
+    | STR                                       # EStr
+    | '(' nonvoid_type ')' 'null'               # ENull
+    | '(' expr ')'                              # EParen
+    | <assoc=right> expr '[' expr ']'           # EArrSub
+    | <assoc=right> expr '.' ID                 # EField
+    | <assoc=right> expr '.' ID '(' args ')'    # EMetCall
+    | 'new' newtype                             # ENew
+    ;
+
+args
+    : ( arg ( ',' arg )* )?
+    | /* no args */
+    ;
+
+arg
+    : expr
     ;
 
 addOp

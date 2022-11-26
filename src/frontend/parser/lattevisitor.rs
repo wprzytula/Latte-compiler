@@ -17,11 +17,11 @@ pub trait LatteVisitor<'input>: ParseTreeVisitor<'input, LatteParserContextType>
     }
 
     /**
-     * Visit a parse tree produced by the {@code FnDef}
+     * Visit a parse tree produced by the {@code TopFnDef}
      * labeled alternative in {@link LatteParser#topDef}.
      * @param ctx the parse tree
      */
-    fn visit_FnDef(&mut self, ctx: &FnDefContext<'input>) {
+    fn visit_TopFnDef(&mut self, ctx: &TopFnDefContext<'input>) {
         self.visit_children(ctx)
     }
 
@@ -52,10 +52,18 @@ pub trait LatteVisitor<'input>: ParseTreeVisitor<'input, LatteParserContextType>
     }
 
     /**
-     * Visit a parse tree produced by {@link LatteParser#arg}.
+     * Visit a parse tree produced by {@link LatteParser#params}.
      * @param ctx the parse tree
      */
-    fn visit_arg(&mut self, ctx: &ArgContext<'input>) {
+    fn visit_params(&mut self, ctx: &ParamsContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by {@link LatteParser#param}.
+     * @param ctx the parse tree
+     */
+    fn visit_param(&mut self, ctx: &ParamContext<'input>) {
         self.visit_children(ctx)
     }
 
@@ -94,10 +102,28 @@ pub trait LatteVisitor<'input>: ParseTreeVisitor<'input, LatteParserContextType>
     }
 
     /**
-     * Visit a parse tree produced by {@link LatteParser#item}.
+     * Visit a parse tree produced by {@link LatteParser#items}.
      * @param ctx the parse tree
      */
-    fn visit_item(&mut self, ctx: &ItemContext<'input>) {
+    fn visit_items(&mut self, ctx: &ItemsContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code DeclItemUninit}
+     * labeled alternative in {@link LatteParser#item}.
+     * @param ctx the parse tree
+     */
+    fn visit_DeclItemUninit(&mut self, ctx: &DeclItemUninitContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code DeclItemInit}
+     * labeled alternative in {@link LatteParser#item}.
+     * @param ctx the parse tree
+     */
+    fn visit_DeclItemInit(&mut self, ctx: &DeclItemInitContext<'input>) {
         self.visit_children(ctx)
     }
 
@@ -524,6 +550,22 @@ pub trait LatteVisitor<'input>: ParseTreeVisitor<'input, LatteParserContextType>
     }
 
     /**
+     * Visit a parse tree produced by {@link LatteParser#args}.
+     * @param ctx the parse tree
+     */
+    fn visit_args(&mut self, ctx: &ArgsContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by {@link LatteParser#arg}.
+     * @param ctx the parse tree
+     */
+    fn visit_arg(&mut self, ctx: &ArgContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
      * Visit a parse tree produced by {@link LatteParser#addOp}.
      * @param ctx the parse tree
      */
@@ -560,11 +602,11 @@ pub trait LatteVisitorCompat<'input>:
     }
 
     /**
-     * Visit a parse tree produced by the {@code FnDef}
+     * Visit a parse tree produced by the {@code TopFnDef}
      * labeled alternative in {@link LatteParser#topDef}.
      * @param ctx the parse tree
      */
-    fn visit_FnDef(&mut self, ctx: &FnDefContext<'input>) -> Self::Return {
+    fn visit_TopFnDef(&mut self, ctx: &TopFnDefContext<'input>) -> Self::Return {
         self.visit_children(ctx)
     }
 
@@ -595,10 +637,18 @@ pub trait LatteVisitorCompat<'input>:
     }
 
     /**
-     * Visit a parse tree produced by {@link LatteParser#arg}.
+     * Visit a parse tree produced by {@link LatteParser#params}.
      * @param ctx the parse tree
      */
-    fn visit_arg(&mut self, ctx: &ArgContext<'input>) -> Self::Return {
+    fn visit_params(&mut self, ctx: &ParamsContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by {@link LatteParser#param}.
+     * @param ctx the parse tree
+     */
+    fn visit_param(&mut self, ctx: &ParamContext<'input>) -> Self::Return {
         self.visit_children(ctx)
     }
 
@@ -637,10 +687,28 @@ pub trait LatteVisitorCompat<'input>:
     }
 
     /**
-     * Visit a parse tree produced by {@link LatteParser#item}.
+     * Visit a parse tree produced by {@link LatteParser#items}.
      * @param ctx the parse tree
      */
-    fn visit_item(&mut self, ctx: &ItemContext<'input>) -> Self::Return {
+    fn visit_items(&mut self, ctx: &ItemsContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code DeclItemUninit}
+     * labeled alternative in {@link LatteParser#item}.
+     * @param ctx the parse tree
+     */
+    fn visit_DeclItemUninit(&mut self, ctx: &DeclItemUninitContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code DeclItemInit}
+     * labeled alternative in {@link LatteParser#item}.
+     * @param ctx the parse tree
+     */
+    fn visit_DeclItemInit(&mut self, ctx: &DeclItemInitContext<'input>) -> Self::Return {
         self.visit_children(ctx)
     }
 
@@ -1067,6 +1135,22 @@ pub trait LatteVisitorCompat<'input>:
     }
 
     /**
+     * Visit a parse tree produced by {@link LatteParser#args}.
+     * @param ctx the parse tree
+     */
+    fn visit_args(&mut self, ctx: &ArgsContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by {@link LatteParser#arg}.
+     * @param ctx the parse tree
+     */
+    fn visit_arg(&mut self, ctx: &ArgContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
      * Visit a parse tree produced by {@link LatteParser#addOp}.
      * @param ctx the parse tree
      */
@@ -1100,8 +1184,8 @@ where
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
-    fn visit_FnDef(&mut self, ctx: &FnDefContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_FnDef(self, ctx);
+    fn visit_TopFnDef(&mut self, ctx: &TopFnDefContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_TopFnDef(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
@@ -1120,8 +1204,13 @@ where
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
-    fn visit_arg(&mut self, ctx: &ArgContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_arg(self, ctx);
+    fn visit_params(&mut self, ctx: &ParamsContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_params(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_param(&mut self, ctx: &ParamContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_param(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
@@ -1145,8 +1234,18 @@ where
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
-    fn visit_item(&mut self, ctx: &ItemContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_item(self, ctx);
+    fn visit_items(&mut self, ctx: &ItemsContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_items(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_DeclItemUninit(&mut self, ctx: &DeclItemUninitContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_DeclItemUninit(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_DeclItemInit(&mut self, ctx: &DeclItemInitContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_DeclItemInit(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
@@ -1382,6 +1481,16 @@ where
 
     fn visit_EField(&mut self, ctx: &EFieldContext<'input>) {
         let result = <Self as LatteVisitorCompat>::visit_EField(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_args(&mut self, ctx: &ArgsContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_args(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_arg(&mut self, ctx: &ArgContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_arg(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
