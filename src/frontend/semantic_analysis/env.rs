@@ -47,16 +47,9 @@ pub enum MissingDeclarationError {
     Method(Ident, Ident), // (class, method)
 }
 
-#[derive(Clone, Copy)]
-enum EnvRun {
-    CollectingIds,
-    TypeChecking,
-}
-
 pub struct Env {
-    current_run: EnvRun,
     current_scope: u32,
-    variables: Map<Ident, (NonvoidType, u32, bool)>, // name -> (type, scope declared, initialised)
+    variables: Map<Ident, (NonvoidType, u32)>, // name -> (type, scope declared)
     functions: Map<Ident, FunType>,                  // name -> type
     classes: Map<Ident, Option<Ident>>,              // class -> base class
     fields: Map<(Ident, Ident), NonvoidType>,        // (class, field) -> type
@@ -66,7 +59,6 @@ pub struct Env {
 impl Env {
     pub fn new() -> Self {
         Self {
-            current_run: EnvRun::CollectingIds,
             current_scope: 0,
             variables: Map::new(),
             functions: Map::new(),
@@ -78,7 +70,6 @@ impl Env {
 
     pub fn new_scope(&self) -> Self {
         Self {
-            current_run: self.current_run,
             current_scope: self.current_scope + 1,
             variables: self.variables.clone(),
             functions: self.functions.clone(),
@@ -88,56 +79,28 @@ impl Env {
         }
     }
 
-    pub fn typecheck_phase(&mut self) {
-        assert!(matches!(self.current_run, EnvRun::CollectingIds));
-        self.current_run = EnvRun::TypeChecking;
-    }
-
     pub fn declare_variable(
         &mut self,
         id: Ident,
         data_type: NonvoidType,
-        initialised: bool,
     ) -> Result<(), DoubleDeclarationError> {
-        if let Some((_, scope, _)) = self.variables.get(&id) {
+        if let Some((_, scope)) = self.variables.get(&id) {
             if *scope == self.current_scope {
                 return Err(DoubleDeclarationError::Var(id));
             }
         }
         self.variables
-            .insert_mut(id, (data_type, self.current_scope, initialised));
+            .insert_mut(id, (data_type, self.current_scope));
         Ok(())
     }
 
-    pub fn init_variable(&mut self, id: &Ident) -> Result<(), MissingDeclarationError> {
-        self.variables
-            .get_mut(id)
-            .ok_or(MissingDeclarationError::Var(id.clone()))?
-            .2 = true;
-        Ok(())
-    }
-
-    pub fn get_variable_type_and_is_init(
+    pub fn get_variable_type(
         &self,
         id: &Ident,
-    ) -> Result<(&NonvoidType, bool), MissingDeclarationError> {
+    ) -> Result<&NonvoidType, MissingDeclarationError> {
         self.variables
             .get(&id)
-            .map(|type_scope_init| (&type_scope_init.0, type_scope_init.2))
-            .ok_or(MissingDeclarationError::Var(id.clone()))
-    }
-
-    pub fn get_variable_type_and_make_init(
-        &mut self,
-        id: &Ident,
-    ) -> Result<(&NonvoidType, bool), MissingDeclarationError> {
-        self.variables
-            .get_mut(&id)
-            .map(|type_scope_init| {
-                let prev_init = type_scope_init.2;
-                type_scope_init.2 = true;
-                (&type_scope_init.0, prev_init)
-            })
+            .map(|type_scope_init| &type_scope_init.0)
             .ok_or(MissingDeclarationError::Var(id.clone()))
     }
 

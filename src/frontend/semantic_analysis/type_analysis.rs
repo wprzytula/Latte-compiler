@@ -141,11 +141,11 @@ pub enum TypeCheckError {
     #[error("")]
     DoubleDeclaration(#[from] DoubleDeclarationError),
 
-    #[error("")]
-    PossiblyUninitAccess(LVal),
+    // #[error("")]
+    // PossiblyUninitAccess(LVal),
 
-    #[error("")]
-    PossiblyUninitVariableAccess(Ident),
+    // #[error("")]
+    // PossiblyUninitVariableAccess(Ident),
 
     #[error("")]
     BadForElemType(NonvoidType, DataType),
@@ -270,7 +270,7 @@ impl FunDef {
     fn type_check(&self, env: &mut Env) -> Result<(), TypeCheckError> {
         // Add params to env
         for param in self.params.iter() {
-            env.declare_variable(param.name.clone(), param.type_.clone(), true)?;
+            env.declare_variable(param.name.clone(), param.type_.clone())?;
         }
 
 
@@ -347,7 +347,6 @@ impl Stmt {
                     env.declare_variable(
                         single_decl.name.clone(),
                         decl.type_.clone(),
-                        single_decl.init.is_some(),
                     )?;
                 }
                 Ok(None)
@@ -355,7 +354,7 @@ impl Stmt {
 
             Stmt::Ass(lval, expr) => {
                 let (expr_type, _) = expr.type_check(env)?;
-                let (lval_type, _was_init) = lval.type_check_and_make_init(env)?;
+                let lval_type = lval.type_check(env)?;
 
                 if expr_type != *lval_type {
                     return Err(TypeCheckError::IncompatibleAssignment(
@@ -370,7 +369,7 @@ impl Stmt {
             }
 
             Stmt::Incr(lval) => {
-                let (lval_type, init) = lval.type_check_and_get_is_init(env)?;
+                let lval_type = lval.type_check(env)?;
                 if !matches!(lval_type, NonvoidType::TInt) {
                     return Err(TypeCheckError::IncompatibleIncrementation(
                         self.clone(),
@@ -378,23 +377,17 @@ impl Stmt {
                         lval_type.clone(),
                     ));
                 }
-                if !init {
-                    return Err(TypeCheckError::PossiblyUninitAccess(lval.clone()));
-                }
                 Ok(None)
             }
 
             Stmt::Decr(lval) => {
-                let (lval_type, init) = lval.type_check_and_get_is_init(env)?;
+                let lval_type = lval.type_check(env)?;
                 if !matches!(lval_type, NonvoidType::TInt) {
                     return Err(TypeCheckError::IncompatibleDecrementation(
                         self.clone(),
                         lval.clone(),
                         lval_type.clone(),
                     ));
-                }
-                if !init {
-                    return Err(TypeCheckError::PossiblyUninitAccess(lval.clone()));
                 }
                 Ok(None)
             }
@@ -498,27 +491,13 @@ impl Stmt {
 }
 
 impl LVal {
-    fn type_check_and_make_init<'env>(
-        &self,
-        env: &'env mut Env,
-    ) -> Result<(&'env NonvoidType, bool), TypeCheckError> {
-        // (type, prev_init)
-        match self {
-            LVal::Id(id) => env
-                .get_variable_type_and_make_init(id)
-                .map_err(|e| e.into()),
-            LVal::LField(_, _) => todo!(),
-            LVal::LArr(_, _) => todo!(),
-        }
-    }
-
-    fn type_check_and_get_is_init<'env>(
+    fn type_check<'env>(
         &self,
         env: &'env Env,
-    ) -> Result<(&'env NonvoidType, bool), TypeCheckError> {
+    ) -> Result<&'env NonvoidType, TypeCheckError> {
         // (type, init)
         match self {
-            LVal::Id(id) => env.get_variable_type_and_is_init(id).map_err(|e| e.into()),
+            LVal::Id(id) => env.get_variable_type(id).map_err(|e| e.into()),
             LVal::LField(_, _) => todo!(),
             LVal::LArr(_, _) => todo!(),
         }
@@ -730,12 +709,8 @@ impl Expr {
             },
 
             Expr::Id(id) => {
-                let (var_type, initialised) = env.get_variable_type_and_is_init(id)?;
-                if !initialised {
-                    Err(TypeCheckError::PossiblyUninitVariableAccess(id.clone()))
-                } else {
+                let var_type = env.get_variable_type(id)?;
                     Ok((var_type.clone().into(), None))
-                }
             }
 
             Expr::FunCall { name, args } => {
