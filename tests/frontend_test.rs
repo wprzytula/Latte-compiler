@@ -125,9 +125,17 @@ fn lattests_typecheck() {
             let full_path = path.join(name);
             let res = typecheck_file(path.join(name));
             if good {
-                res.unwrap_or_else(|err| panic!("Test failed but should succeed: {}\n{}", full_path.display(), err));
+                res.unwrap_or_else(|err| {
+                    panic!(
+                        "Test failed but should succeed: {}\n{:?}",
+                        full_path.display(),
+                        err
+                    )
+                });
             } else {
-                res.err().unwrap_or_else(|| panic!("Test succeeded but should fail: {}", full_path.display()));
+                res.err().unwrap_or_else(|| {
+                    panic!("Test succeeded but should fail: {}", full_path.display())
+                });
             }
         }
     }
