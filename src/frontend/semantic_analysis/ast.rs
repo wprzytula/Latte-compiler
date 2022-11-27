@@ -1,9 +1,32 @@
+use antlr_rust::token::GenericToken;
 use smallvec::SmallVec;
 use std::{
+    borrow::Cow,
+    cell::Ref,
     fmt::{self, Display},
     ops::Deref,
     rc::Rc,
 };
+
+#[derive(Debug, Clone, Copy)]
+pub struct Pos {
+    pub line: isize,
+    pub column: isize,
+}
+impl From<Ref<'_, GenericToken<Cow<'_, str>>>> for Pos {
+    fn from(token_start: Ref<GenericToken<Cow<str>>>) -> Self {
+        Self {
+            line: token_start.line,
+            column: token_start.column,
+        }
+    }
+}
+
+impl Display for Pos {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "in line {}, column {}", self.line, self.column)
+    }
+}
 
 #[derive(Debug)]
 pub struct Program(pub Vec<TopDef>);
@@ -18,6 +41,7 @@ pub enum TopDef {
 
 #[derive(Debug, Clone)]
 pub struct FunDef {
+    pub pos: Pos,
     pub ret_type: DataType,
     pub name: Ident,
     pub params: Vec<Param>,
@@ -52,10 +76,20 @@ pub struct DataDecl {
 }
 
 #[derive(Debug, Clone)]
-pub struct Block(pub Vec<Stmt>);
+pub struct Block(pub Pos, pub Vec<Stmt>);
 
 #[derive(Debug, Clone)]
-pub enum Stmt {
+pub struct Stmt(pub Pos, pub StmtInner);
+impl Deref for Stmt {
+    type Target = StmtInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.1
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtInner {
     Empty,
     Block(Block),
     VarDecl(DataDecl),
@@ -85,6 +119,11 @@ pub enum NonvoidType {
     TBoolean,
     TArr(Box<NonvoidType>),
     Class(Ident),
+}
+impl Display for NonvoidType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "") // FIXME
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,7 +215,17 @@ pub enum LogOpType {
 }
 
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub struct Expr(pub Pos, pub ExprInner);
+impl Deref for Expr {
+    type Target = ExprInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.1
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ExprInner {
     Op(Op),
     Id(Ident),
     IntLit(Int),

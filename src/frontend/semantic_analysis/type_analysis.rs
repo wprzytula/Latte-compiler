@@ -11,24 +11,38 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TypeCheckError {
-    #[error("")]
+    #[error(
+        "{}: Function {} was applied {} arguments, but expected {}.",
+        pos,
+        func,
+        actual,
+        expected
+    )]
     WrongFuncArgNum {
+        pos: Pos,
         func: Ident,
         expected: usize,
         actual: usize,
     },
 
-    #[error("")]
+    #[error("")] // TODO
     WrongMethodArgNum {
-        surr: Expr,
+        pos: Pos,
         class: Ident,
         method: Ident,
         expected: usize,
         actual: usize,
     },
 
-    #[error("")]
+    #[error(
+        "{}: Function {} was applied arguments of nonmatching types: expected {}, got {}.",
+        pos,
+        func,
+        expected,
+        actual
+    )]
     WrongArgTypes {
+        pos: Pos,
         func: Ident,
         expected: Vec<NonvoidType>,
         actual: Vec<DataType>,
@@ -50,37 +64,22 @@ pub enum TypeCheckError {
     RelWrongType(Expr, DataType),
 
     #[error("")]
-    EqWrongTypes(Expr, DataType, BinOpType, Expr, DataType),
-
-    #[error("")]
-    AndWrongType(Expr, DataType),
-
-    #[error("")]
-    OrWrongType(Expr, DataType),
-
-    #[error("")]
-    MultipleMain(FunDef),
+    EqWrongTypes(Pos, Expr, DataType, BinOpType, Expr, DataType),
 
     #[error("")]
     NoMain,
 
     #[error("")]
-    ArgsInMain(FunDef),
+    ArgsInMain(Pos, FunDef),
 
     #[error("")]
-    RepeatedParams(FunDef),
+    RepeatedParams(FunDef), // currently served by DoubleDeclaration
 
     #[error("")]
-    VoidParams(FunDef),
+    NoReturnInNonVoidFun(FunDef), // currently served by ReturnTypeMismatch? Nope
 
     #[error("")]
-    NoReturnInNonVoidFun(FunDef),
-
-    #[error("")]
-    ReturnTypeMismatch(FunDef, RetType, RetType),
-
-    #[error("")]
-    VoidVariables(Stmt),
+    ReturnTypeMismatch(FunDef, RetType, RetType), // unused?
 
     #[error("")]
     IncompatibleInitialization(Stmt, Expr, Ident, NonvoidType, DataType),
@@ -95,32 +94,16 @@ pub enum TypeCheckError {
     IncompatibleDecrementation(Stmt, LVal, NonvoidType),
 
     #[error("")]
-    UndefinedVariableAssignment(Stmt, LVal),
-
-    #[error("")]
-    UndefinedVariableIncrementation(Stmt, LVal),
-
-    #[error("")]
-    UndefinedVariableDecrementation(Stmt, LVal),
-
-    #[error("")]
     WrongConditionType(Stmt, Expr, DataType),
 
-    #[error("")]
-    PossibleNonReturn {
-        surr: Stmt,
-        if_br: Stmt,
-        if_ret: StmtRetType,
-        else_br: Stmt,
-        else_ret: StmtRetType,
-    },
-
-    #[error("")]
-    BreakOutsideLoop(Stmt),
-
-    #[error("")]
-    ContinueOutsideLoop(Stmt),
-
+    // #[error("")]
+    // PossibleNonReturn {
+    //     surr: Stmt,
+    //     if_br: Stmt,
+    //     if_ret: StmtRetType,
+    //     else_br: Stmt,
+    //     else_ret: StmtRetType,
+    // },
     #[error("")]
     IncompatibleBranchesType {
         surr: Stmt,
@@ -131,9 +114,6 @@ pub enum TypeCheckError {
     },
 
     #[error("")]
-    IncompatibleRetTypesInBlock(Stmt, StmtRetType, Block, StmtRetType), // FIXME: particular Stmt is against generalised Block (no explicit offensor)
-
-    #[error("")]
     IncompatibleRetTypesInFunction(FunDef, DataType, Block, StmtRetType),
 
     #[error(transparent)] // FIXME
@@ -142,13 +122,8 @@ pub enum TypeCheckError {
     #[error("")]
     DoubleDeclaration(#[from] DoubleDeclarationError),
 
-    // #[error("")]
-    // PossiblyUninitAccess(LVal),
-
-    // #[error("")]
-    // PossiblyUninitVariableAccess(Ident),
     #[error("")]
-    BadForElemType(NonvoidType, DataType),
+    BadForElemType(Stmt, NonvoidType, DataType),
 
     #[error("")]
     IntBinOpWrongType(Expr, DataType),
@@ -157,19 +132,19 @@ pub enum TypeCheckError {
     LogOpWrongType(Expr, DataType),
 
     #[error("")]
-    BadArrType(DataType),
+    BadArrType(Expr, DataType), // TODO
 
     #[error("")]
-    BadArrIndex(DataType),
+    BadArrIndex(Expr, DataType), // TODO
 
     #[error("")]
-    NonObjectFieldAccess(DataType),
+    NonObjectFieldAccess(Expr, DataType), // TODO
 
     #[error("")]
-    WrongMainRetType(DataType),
+    WrongMainRetType(Pos, DataType),
 
     #[error("")]
-    InvalidReturnType(DataType, DataType), // (allowed, attempted)
+    InvalidReturnType(Pos, /* Ident,  */DataType, DataType), // (allowed, attempted)
 }
 
 impl From<Either<DoubleDeclarationError, MissingDeclarationError>> for TypeCheckError {
@@ -301,10 +276,10 @@ impl FunDef {
         };
         if self.name.deref() == "main" {
             if !self.params.is_empty() {
-                return Err(TypeCheckError::ArgsInMain(self.clone()));
+                return Err(TypeCheckError::ArgsInMain(self.pos, self.clone()));
             }
             if !matches!(self.ret_type, DataType::Nonvoid(NonvoidType::TInt)) {
-                return Err(TypeCheckError::WrongMainRetType(self.ret_type.clone()));
+                return Err(TypeCheckError::WrongMainRetType(self.pos, self.ret_type.clone()));
             }
         }
         env.declare_function(self.name.clone(), fun_type)?;
@@ -342,7 +317,7 @@ impl Block {
     ) -> Result<StmtRetType, TypeCheckError> {
         // eprintln!("type checking block: {:#?}", self);
         let mut block_ret_type = None;
-        for stmt in &self.0 {
+        for stmt in &self.1 {
             let stmt_ret_type = stmt.type_check(env, allowed_ret_type)?;
             match (stmt_ret_type, &block_ret_type) {
                 (None, _) => (),
@@ -351,12 +326,9 @@ impl Block {
                     if stmt_ret == *block_ret {
                         block_ret_type = Some((stmt_ret, *block_certain || stmt_certain));
                     } else {
-                        return Err(TypeCheckError::IncompatibleRetTypesInBlock(
-                            stmt.clone(),
-                            Some((stmt_ret, stmt_certain)),
-                            self.clone(),
-                            block_ret_type,
-                        ));
+                        unreachable!(
+                            "This is handled by restricting Returns to a certain type only"
+                        )
                     }
                 }
             }
@@ -372,15 +344,16 @@ impl Stmt {
         allowed_ret_type: &DataType,
     ) -> Result<StmtRetType, TypeCheckError> {
         // eprintln!("type checking stmt: {:#?}", self);
-        match self {
-            Stmt::Empty => Ok(None),
+        let pos = self.0;
+        match &self.1 {
+            StmtInner::Empty => Ok(None),
 
-            Stmt::Block(block) => {
+            StmtInner::Block(block) => {
                 let block_ret = block.type_check(&mut env.new_scope(), allowed_ret_type)?;
                 Ok(block_ret)
             }
 
-            Stmt::VarDecl(decl) => {
+            StmtInner::VarDecl(decl) => {
                 for single_decl in decl.decls.iter() {
                     if let Some(ref init_expr) = single_decl.init {
                         let (init_type, _) = init_expr.type_check(env)?;
@@ -399,7 +372,7 @@ impl Stmt {
                 Ok(None)
             }
 
-            Stmt::Ass(lval, expr) => {
+            StmtInner::Ass(lval, expr) => {
                 let (expr_type, _) = expr.type_check(env)?;
                 let lval_type = lval.type_check(env)?;
 
@@ -415,7 +388,7 @@ impl Stmt {
                 Ok(None)
             }
 
-            Stmt::Incr(lval) => {
+            StmtInner::Incr(lval) => {
                 let lval_type = lval.type_check(env)?;
                 if !matches!(lval_type, NonvoidType::TInt) {
                     return Err(TypeCheckError::IncompatibleIncrementation(
@@ -427,7 +400,7 @@ impl Stmt {
                 Ok(None)
             }
 
-            Stmt::Decr(lval) => {
+            StmtInner::Decr(lval) => {
                 let lval_type = lval.type_check(env)?;
                 if !matches!(lval_type, NonvoidType::TInt) {
                     return Err(TypeCheckError::IncompatibleDecrementation(
@@ -439,30 +412,32 @@ impl Stmt {
                 Ok(None)
             }
 
-            Stmt::Return(ret) => {
+            StmtInner::Return(ret) => {
                 let (ret_type, _) = ret.type_check(env)?;
                 if &ret_type == allowed_ret_type {
                     Ok(StmtRetType::Some((ret_type, true)))
                 } else {
                     Err(TypeCheckError::InvalidReturnType(
+                        pos,
                         allowed_ret_type.clone(),
                         ret_type,
                     ))
                 }
             }
 
-            Stmt::VoidReturn => {
+            StmtInner::VoidReturn => {
                 if let &DataType::TVoid = allowed_ret_type {
                     Ok(StmtRetType::Some((DataType::TVoid, true)))
                 } else {
                     Err(TypeCheckError::InvalidReturnType(
+                        pos,
                         allowed_ret_type.clone(),
                         DataType::TVoid,
                     ))
                 }
             }
 
-            Stmt::Cond(condition, body) | Stmt::While(condition, body) => {
+            StmtInner::Cond(condition, body) | StmtInner::While(condition, body) => {
                 let (cond_type, constval) = condition.type_check(env)?;
                 match (&cond_type, constval) {
                     (DataType::Nonvoid(NonvoidType::TBoolean), None) => {
@@ -470,7 +445,7 @@ impl Stmt {
                         Ok(then_stmt_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
                     }
                     (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(true))) => {
-                        if matches!(self, Stmt::While(_, _)) {
+                        if matches!(self.1, StmtInner::While(_, _)) {
                             body.type_check(env, allowed_ret_type).map(|ret| {
                                 ret.map(|(ret, _certain)| {
                                     (ret, true) // while(true) will certainly return, otherwise it would loop infinitely (no breaks in Latte)
@@ -495,7 +470,7 @@ impl Stmt {
                 }
             }
 
-            Stmt::CondElse(condition, then_stmt, else_stmt) => {
+            StmtInner::CondElse(condition, then_stmt, else_stmt) => {
                 let (ret_type, constval) = condition.type_check(&mut env.new_scope())?;
                 let then_stmt_ret = then_stmt.type_check(env, allowed_ret_type)?;
                 let else_stmt_ret = else_stmt.type_check(env, allowed_ret_type)?;
@@ -539,16 +514,17 @@ impl Stmt {
                 }
             }
 
-            Stmt::SExp(e) => {
+            StmtInner::SExp(e) => {
                 e.type_check(env)?;
                 Ok(None)
             }
 
-            Stmt::For(elem_type, elem_name, array_expr, body) => {
+            StmtInner::For(elem_type, elem_name, array_expr, body) => {
                 let (iterable_type, _) = array_expr.type_check(env)?;
                 if let DataType::Nonvoid(NonvoidType::TArr(ref x)) = iterable_type {
                     if **x != *elem_type {
                         return Err(TypeCheckError::BadForElemType(
+                            self.clone(),
                             elem_type.clone(),
                             iterable_type,
                         ));
@@ -580,23 +556,24 @@ impl Expr {
     fn type_check(&self, env: &Env) -> Result<(DataType, Option<Constexpr>), TypeCheckError> {
         // (type, consteval)
         // eprintln!("type checking expr: {:#?}", self);
-        match self {
-            Expr::IntLit(i) => Ok((
+        let pos = self.0;
+        match &self.1 {
+            ExprInner::IntLit(i) => Ok((
                 DataType::Nonvoid(NonvoidType::TInt),
                 Some(Constexpr::Int(*i)),
             )),
 
-            Expr::BoolLit(b) => Ok((
+            ExprInner::BoolLit(b) => Ok((
                 DataType::Nonvoid(NonvoidType::TBoolean),
                 Some(Constexpr::Bool(*b)),
             )),
 
-            Expr::StringLit(s) => Ok((
+            ExprInner::StringLit(s) => Ok((
                 DataType::Nonvoid(NonvoidType::TString),
                 Some(Constexpr::String(s.clone())),
             )),
 
-            Expr::Op(op) => match op {
+            ExprInner::Op(op) => match op {
                 Op::UnOp(un_op_type, expr) => {
                     let (expr_type, constval) = expr.type_check(env)?;
                     match un_op_type {
@@ -731,6 +708,7 @@ impl Expr {
                                     Ok((DataType::Nonvoid(NonvoidType::TBoolean), constval))
                                 }
                                 _ => Err(TypeCheckError::EqWrongTypes(
+                                    pos,
                                     expr1.deref().clone(),
                                     expr1_type,
                                     bin_op_type.clone(),
@@ -818,15 +796,16 @@ impl Expr {
                 }
             },
 
-            Expr::Id(id) => {
+            ExprInner::Id(id) => {
                 let var_type = env.get_variable_type(id)?;
                 Ok((var_type.clone().into(), None))
             }
 
-            Expr::FunCall { name, args } => {
+            ExprInner::FunCall { name, args } => {
                 let func = env.get_function_type(name)?.clone();
                 if args.len() != func.params.len() {
                     return Err(TypeCheckError::WrongFuncArgNum {
+                        pos,
                         func: name.clone(),
                         expected: func.params.len(),
                         actual: args.len(),
@@ -839,6 +818,7 @@ impl Expr {
 
                 if arg_types != func.params {
                     return Err(TypeCheckError::WrongArgTypes {
+                        pos,
                         func: name.clone(),
                         expected: func.params.clone(),
                         actual: arg_types,
@@ -848,37 +828,37 @@ impl Expr {
                 Ok((func.ret_type.clone(), None))
             }
 
-            Expr::ArrSub(arr, idx) => {
+            ExprInner::ArrSub(arr, idx) => {
                 todo!();
                 let (arr_type, _) = arr.type_check(env)?;
                 let elt_type = if let DataType::Nonvoid(NonvoidType::TArr(inner_type)) = arr_type {
                     *inner_type
                 } else {
-                    return Err(TypeCheckError::BadArrType(arr_type));
+                    return Err(TypeCheckError::BadArrType(arr.deref().clone(), arr_type));
                 };
 
                 let (idx_type, _) = idx.type_check(env)?;
                 if !matches!(idx_type, DataType::Nonvoid(NonvoidType::TInt)) {
-                    return Err(TypeCheckError::BadArrIndex(idx_type));
+                    return Err(TypeCheckError::BadArrIndex(idx.deref().clone(), idx_type));
                 }
 
                 Ok((elt_type.into(), None))
             }
 
-            Expr::FieldAccess(object, field) => {
+            ExprInner::FieldAccess(object, field) => {
                 todo!();
                 let (object_type, _) = object.type_check(env)?;
                 let class = if let DataType::Nonvoid(NonvoidType::Class(name)) = object_type {
                     name
                 } else {
-                    return Err(TypeCheckError::NonObjectFieldAccess(object_type));
+                    return Err(TypeCheckError::NonObjectFieldAccess(self.clone(), object_type));
                 };
                 let field_type = env.get_field_type(class, field.clone())?;
 
                 Ok((field_type.clone().into(), None))
             }
 
-            Expr::MethodCall {
+            ExprInner::MethodCall {
                 object,
                 method_name,
                 args,
@@ -888,12 +868,13 @@ impl Expr {
                 let class = if let DataType::Nonvoid(NonvoidType::Class(name)) = object_type {
                     name
                 } else {
-                    return Err(TypeCheckError::NonObjectFieldAccess(object_type));
+                    return Err(TypeCheckError::NonObjectFieldAccess(self.clone(), object_type));
                 };
                 let method = env.resolve_method(class, method_name.clone())?;
 
                 if args.len() != method.params.len() {
                     return Err(TypeCheckError::WrongFuncArgNum {
+                        pos,
                         func: method_name.clone(),
                         expected: method.params.len(),
                         actual: args.len(),
@@ -907,6 +888,7 @@ impl Expr {
 
                 if arg_types != method.params {
                     return Err(TypeCheckError::WrongArgTypes {
+                        pos,
                         func: method_name.clone(),
                         expected: method.params.clone(),
                         actual: arg_types,
@@ -916,9 +898,9 @@ impl Expr {
                 Ok((method.ret_type.clone(), None))
             }
 
-            Expr::Null(data_type) => Ok((data_type.clone().into(), Some(Constexpr::Null))),
+            ExprInner::Null(data_type) => Ok((data_type.clone().into(), Some(Constexpr::Null))),
 
-            Expr::New(new_type) => {
+            ExprInner::New(new_type) => {
                 let data_type = match new_type {
                     NewType::TInt => DataType::Nonvoid(NonvoidType::TInt),
                     NewType::TString => DataType::Nonvoid(NonvoidType::TString),
