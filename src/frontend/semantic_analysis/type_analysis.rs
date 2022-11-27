@@ -443,7 +443,15 @@ impl Stmt {
                         Ok(then_stmt_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
                     }
                     (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(true))) => {
-                        body.type_check(env)
+                        if matches!(self, Stmt::While(_, _)) {
+                            body.type_check(env).map(|ret| {
+                                ret.map(|(ret, _certain)| {
+                                    (ret, true) // while(true) will certainly return, otherwise it would loop infinitely (no breaks in Latte)
+                                })
+                            })
+                        } else {
+                            body.type_check(env)
+                        }
                     }
                     (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(false))) => {
                         Ok({
