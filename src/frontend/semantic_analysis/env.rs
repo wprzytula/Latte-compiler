@@ -50,10 +50,10 @@ pub enum MissingDeclarationError {
 pub struct Env {
     current_scope: u32,
     variables: Map<Ident, (NonvoidType, u32)>, // name -> (type, scope declared)
-    functions: Map<Ident, FunType>,                  // name -> type
-    classes: Map<Ident, Option<Ident>>,              // class -> base class
-    fields: Map<(Ident, Ident), NonvoidType>,        // (class, field) -> type
-    methods: Map<(Ident, Ident), FunType>,           // (class, method) -> type
+    functions: Map<Ident, FunType>,            // name -> type
+    classes: Map<Ident, Option<Ident>>,        // class -> base class
+    fields: Map<(Ident, Ident), NonvoidType>,  // (class, field) -> type
+    methods: Map<(Ident, Ident), FunType>,     // (class, method) -> type
 }
 
 impl Env {
@@ -94,10 +94,7 @@ impl Env {
         Ok(())
     }
 
-    pub fn get_variable_type(
-        &self,
-        id: &Ident,
-    ) -> Result<&NonvoidType, MissingDeclarationError> {
+    pub fn get_variable_type(&self, id: &Ident) -> Result<&NonvoidType, MissingDeclarationError> {
         self.variables
             .get(&id)
             .map(|type_scope_init| &type_scope_init.0)

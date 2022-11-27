@@ -146,7 +146,6 @@ pub enum TypeCheckError {
 
     // #[error("")]
     // PossiblyUninitVariableAccess(Ident),
-
     #[error("")]
     BadForElemType(NonvoidType, DataType),
 
@@ -242,7 +241,7 @@ impl Program {
                 }
             }
         }
-        
+
         // Second run - type check
         for top_def in self.0.iter() {
             match top_def {
@@ -272,7 +271,6 @@ impl FunDef {
         for param in self.params.iter() {
             env.declare_variable(param.name.clone(), param.type_.clone())?;
         }
-
 
         let body_ret_type = self.block.type_check(env)?;
         match (&self.ret_type, &body_ret_type) {
@@ -344,10 +342,7 @@ impl Stmt {
                             ));
                         }
                     }
-                    env.declare_variable(
-                        single_decl.name.clone(),
-                        decl.type_.clone(),
-                    )?;
+                    env.declare_variable(single_decl.name.clone(), decl.type_.clone())?;
                 }
                 Ok(None)
             }
@@ -495,10 +490,7 @@ impl Stmt {
 }
 
 impl LVal {
-    fn type_check<'env>(
-        &self,
-        env: &'env Env,
-    ) -> Result<&'env NonvoidType, TypeCheckError> {
+    fn type_check<'env>(&self, env: &'env Env) -> Result<&'env NonvoidType, TypeCheckError> {
         // (type, init)
         match self {
             LVal::Id(id) => env.get_variable_type(id).map_err(|e| e.into()),
