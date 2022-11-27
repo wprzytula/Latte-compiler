@@ -9,6 +9,7 @@ use antlr_rust::{
 use either::Either;
 use enum_as_inner::EnumAsInner;
 use smallvec::{smallvec, SmallVec};
+use thiserror::Error;
 
 use crate::frontend::parser::{latteparser::*, lattevisitor::LatteVisitorCompat};
 
@@ -105,8 +106,9 @@ impl Default for AstElem {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ConversionError {
+    #[error("Error occured when parsing integer: {0}")]
     ParseInt(ParseIntError),
 }
 

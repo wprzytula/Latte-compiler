@@ -3,5 +3,6 @@ mod ast;
 mod env;
 mod type_analysis;
 
+pub use antlr_to_ast::ConversionError;
 pub use ast::Program;
 pub use type_analysis::TypeCheckError;
