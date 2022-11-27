@@ -6,6 +6,7 @@ use super::{
 };
 
 use either::Either;
+use enum_as_inner::EnumAsInner;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -43,7 +44,7 @@ pub enum TypeCheckError {
     MulWrongType(Expr, DataType),
 
     #[error("")]
-    AddWrongType(Expr, DataType),
+    AddWrongTypes(Expr, DataType, DataType),
 
     #[error("")]
     RelWrongType(Expr, DataType),
@@ -174,6 +175,7 @@ impl From<Either<DoubleDeclarationError, MissingDeclarationError>> for TypeCheck
     }
 }
 
+#[derive(Debug, EnumAsInner)]
 enum Constexpr {
     Bool(bool),
     String(String),
@@ -587,7 +589,6 @@ impl Expr {
                                                 IntRetType::Mul => i1 * i2,
                                                 IntRetType::Div => i1 / i2,
                                                 IntRetType::Mod => i1 % i2,
-                                                IntRetType::Add => i1 + i2,
                                                 IntRetType::Sub => i1 - i2,
                                             }))
                                         } else {
@@ -664,6 +665,45 @@ impl Expr {
                                 )),
                             }
                         }
+                        BinOpType::Add => match (&expr1_type, &expr2_type) {
+                            (
+                                &DataType::Nonvoid(NonvoidType::TInt),
+                                &DataType::Nonvoid(NonvoidType::TInt),
+                            ) => {
+                                let constval = if let (Some(constval1), Some(constval2)) =
+                                    (constval1, constval2)
+                                {
+                                    Some(Constexpr::Int(
+                                        constval1.into_int().unwrap()
+                                            + constval2.into_int().unwrap(),
+                                    ))
+                                } else {
+                                    None
+                                };
+                                Ok((DataType::Nonvoid(NonvoidType::TInt), constval))
+                            }
+                            (
+                                &DataType::Nonvoid(NonvoidType::TString),
+                                DataType::Nonvoid(NonvoidType::TString),
+                            ) => {
+                                let constval = if let (Some(constval1), Some(constval2)) =
+                                    (constval1, constval2)
+                                {
+                                    Some(Constexpr::String(
+                                        constval1.into_string().unwrap()
+                                            + &constval2.into_string().unwrap(),
+                                    ))
+                                } else {
+                                    None
+                                };
+                                Ok((DataType::Nonvoid(NonvoidType::TString), constval))
+                            }
+                            _ => Err(TypeCheckError::AddWrongTypes(
+                                self.clone(),
+                                expr1_type,
+                                expr2_type,
+                            )),
+                        },
                     }
                 }
 

@@ -134,6 +134,7 @@ pub enum UnOpType {
 #[derive(Debug, Clone)]
 pub enum BinOpType {
     IntOp(IntOpType),
+    Add,
     Eq,
     NEq,
 }
@@ -149,7 +150,6 @@ pub enum IntRetType {
     Mul,
     Div,
     Mod,
-    Add,
     Sub,
 }
 

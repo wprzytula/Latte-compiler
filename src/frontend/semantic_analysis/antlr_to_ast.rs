@@ -546,11 +546,11 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
 
     fn visit_addOp(&mut self, ctx: &AddOpContext<'input>) -> Self::Return {
         let op = match ctx.get_text().chars().next().unwrap() {
-            '+' => IntRetType::Add,
-            '-' => IntRetType::Sub,
+            '+' => BinOpType::Add,
+            '-' => BinOpType::IntOp(IntOpType::IntRet(IntRetType::Sub)),
             _ => unreachable!(),
         };
-        Self::Return::BinOp(BinOpType::IntOp(IntOpType::IntRet(op)))
+        Self::Return::BinOp(op)
     }
 
     fn visit_mulOp(&mut self, ctx: &MulOpContext<'input>) -> Self::Return {
