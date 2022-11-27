@@ -632,15 +632,15 @@ impl Expr {
                         op @ BinOpType::Eq | op @ BinOpType::NEq => {
                             match (&expr1_type, &expr2_type) {
                                 (
-                                    t @ &DataType::Nonvoid(NonvoidType::TInt),
+                                    &DataType::Nonvoid(NonvoidType::TInt),
                                     &DataType::Nonvoid(NonvoidType::TInt),
                                 )
                                 | (
-                                    t @ &DataType::Nonvoid(NonvoidType::TString),
+                                    &DataType::Nonvoid(NonvoidType::TString),
                                     &DataType::Nonvoid(NonvoidType::TString),
                                 )
                                 | (
-                                    t @ &DataType::Nonvoid(NonvoidType::TBoolean),
+                                    &DataType::Nonvoid(NonvoidType::TBoolean),
                                     &DataType::Nonvoid(NonvoidType::TBoolean),
                                 ) => {
                                     let constval = if constval1.is_some() && constval2.is_some() {
@@ -653,7 +653,7 @@ impl Expr {
                                     } else {
                                         None
                                     };
-                                    Ok((t.clone(), constval))
+                                    Ok((DataType::Nonvoid(NonvoidType::TBoolean), constval))
                                 }
                                 _ => Err(TypeCheckError::EqWrongTypes(
                                     expr1.deref().clone(),

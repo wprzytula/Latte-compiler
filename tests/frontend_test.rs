@@ -127,7 +127,7 @@ fn lattests_typecheck() {
             if good {
                 res.unwrap_or_else(|err| {
                     panic!(
-                        "Test failed but should succeed: {}\n{:?}",
+                        "Test failed but should succeed: {}\n{:#?}",
                         full_path.display(),
                         err
                     )
