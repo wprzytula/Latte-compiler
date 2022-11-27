@@ -1,6 +1,6 @@
+use std::num::ParseIntError;
 #[allow(non_snake_case)]
 use std::rc::Rc;
-use std::{cell::Cell, num::ParseIntError};
 
 use antlr_rust::tree::{ParseTree, ParseTreeVisitorCompat};
 use either::Either;

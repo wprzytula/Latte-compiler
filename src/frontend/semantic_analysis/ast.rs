@@ -1,6 +1,7 @@
 use smallvec::SmallVec;
 use std::{
     fmt::{self, Display},
+    ops::Deref,
     rc::Rc,
 };
 
@@ -207,6 +208,14 @@ impl From<String> for Ident {
 impl Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl Deref for Ident {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

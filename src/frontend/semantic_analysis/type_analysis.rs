@@ -164,6 +164,9 @@ pub enum TypeCheckError {
 
     #[error("")]
     NonObjectFieldAccess(DataType),
+
+    #[error("")]
+    WrongMainRetType(DataType),
 }
 
 impl From<Either<DoubleDeclarationError, MissingDeclarationError>> for TypeCheckError {
@@ -268,6 +271,10 @@ impl Program {
             }
         }
 
+        if env.get_function_type(&"main".to_owned().into()).is_err() {
+            return Err(TypeCheckError::NoMain);
+        }
+
         // Second run - type check
         for top_def in self.0.iter() {
             match top_def {
@@ -289,6 +296,14 @@ impl FunDef {
             ret_type: self.ret_type.clone(),
             params: self.params.iter().map(|arg| arg.type_.clone()).collect(),
         };
+        if self.name.deref() == "main" {
+            if !self.params.is_empty() {
+                return Err(TypeCheckError::ArgsInMain(self.clone()));
+            }
+            if !matches!(self.ret_type, DataType::Nonvoid(NonvoidType::TInt)) {
+                return Err(TypeCheckError::WrongMainRetType(self.ret_type.clone()));
+            }
+        }
         env.declare_function(self.name.clone(), fun_type)?;
         Ok(())
     }
