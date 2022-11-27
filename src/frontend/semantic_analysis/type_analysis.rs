@@ -167,6 +167,9 @@ pub enum TypeCheckError {
 
     #[error("")]
     WrongMainRetType(DataType),
+
+    #[error("")]
+    InvalidReturnType(DataType, DataType), // (allowed, attempted)
 }
 
 impl From<Either<DoubleDeclarationError, MissingDeclarationError>> for TypeCheckError {
@@ -313,7 +316,7 @@ impl FunDef {
             env.declare_variable(param.name.clone(), param.type_.clone())?;
         }
 
-        let body_ret_type = self.block.type_check(env)?;
+        let body_ret_type = self.block.type_check(env, &self.ret_type)?;
         match (&self.ret_type, &body_ret_type) {
             (&DataType::TVoid, &None) | (&DataType::TVoid, &Some((DataType::TVoid, _))) => Ok(()), // Void return fulfilled
             (&DataType::Nonvoid(ref expected), &Some((DataType::Nonvoid(ref actual), true))) if expected == actual => Ok(()), // Matching nonvoid return
@@ -332,11 +335,15 @@ impl FunDef {
 }
 
 impl Block {
-    fn type_check(&self, env: &mut Env) -> Result<StmtRetType, TypeCheckError> {
+    fn type_check(
+        &self,
+        env: &mut Env,
+        allowed_ret_type: &DataType,
+    ) -> Result<StmtRetType, TypeCheckError> {
         // eprintln!("type checking block: {:#?}", self);
         let mut block_ret_type = None;
         for stmt in &self.0 {
-            let stmt_ret_type = stmt.type_check(env)?;
+            let stmt_ret_type = stmt.type_check(env, allowed_ret_type)?;
             match (stmt_ret_type, &block_ret_type) {
                 (None, _) => (),
                 (stmt_ret_type @ Some(_), None) => block_ret_type = stmt_ret_type,
@@ -359,13 +366,17 @@ impl Block {
 }
 
 impl Stmt {
-    fn type_check(&self, env: &mut Env) -> Result<StmtRetType, TypeCheckError> {
+    fn type_check(
+        &self,
+        env: &mut Env,
+        allowed_ret_type: &DataType,
+    ) -> Result<StmtRetType, TypeCheckError> {
         // eprintln!("type checking stmt: {:#?}", self);
         match self {
             Stmt::Empty => Ok(None),
 
             Stmt::Block(block) => {
-                let block_ret = block.type_check(&mut env.new_scope())?;
+                let block_ret = block.type_check(&mut env.new_scope(), allowed_ret_type)?;
                 Ok(block_ret)
             }
 
@@ -430,32 +441,48 @@ impl Stmt {
 
             Stmt::Return(ret) => {
                 let (ret_type, _) = ret.type_check(env)?;
-                Ok(StmtRetType::Some((ret_type, true)))
+                if &ret_type == allowed_ret_type {
+                    Ok(StmtRetType::Some((ret_type, true)))
+                } else {
+                    Err(TypeCheckError::InvalidReturnType(
+                        allowed_ret_type.clone(),
+                        ret_type,
+                    ))
+                }
             }
 
-            Stmt::VoidReturn => Ok(StmtRetType::Some((DataType::TVoid, true))),
+            Stmt::VoidReturn => {
+                if let &DataType::TVoid = allowed_ret_type {
+                    Ok(StmtRetType::Some((DataType::TVoid, true)))
+                } else {
+                    Err(TypeCheckError::InvalidReturnType(
+                        allowed_ret_type.clone(),
+                        DataType::TVoid,
+                    ))
+                }
+            }
 
             Stmt::Cond(condition, body) | Stmt::While(condition, body) => {
                 let (cond_type, constval) = condition.type_check(env)?;
                 match (&cond_type, constval) {
                     (DataType::Nonvoid(NonvoidType::TBoolean), None) => {
-                        let then_stmt_ret = body.type_check(env)?;
+                        let then_stmt_ret = body.type_check(env, allowed_ret_type)?;
                         Ok(then_stmt_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
                     }
                     (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(true))) => {
                         if matches!(self, Stmt::While(_, _)) {
-                            body.type_check(env).map(|ret| {
+                            body.type_check(env, allowed_ret_type).map(|ret| {
                                 ret.map(|(ret, _certain)| {
                                     (ret, true) // while(true) will certainly return, otherwise it would loop infinitely (no breaks in Latte)
                                 })
                             })
                         } else {
-                            body.type_check(env)
+                            body.type_check(env, allowed_ret_type)
                         }
                     }
                     (DataType::Nonvoid(NonvoidType::TBoolean), Some(Constexpr::Bool(false))) => {
                         Ok({
-                            body.type_check(env)?;
+                            body.type_check(env, allowed_ret_type)?;
                             None
                         })
                     }
@@ -470,8 +497,8 @@ impl Stmt {
 
             Stmt::CondElse(condition, then_stmt, else_stmt) => {
                 let (ret_type, constval) = condition.type_check(&mut env.new_scope())?;
-                let then_stmt_ret = then_stmt.type_check(env)?;
-                let else_stmt_ret = else_stmt.type_check(env)?;
+                let then_stmt_ret = then_stmt.type_check(env, allowed_ret_type)?;
+                let else_stmt_ret = else_stmt.type_check(env, allowed_ret_type)?;
                 match (&ret_type, constval) {
                     (DataType::Nonvoid(NonvoidType::TBoolean), None) => {
                         match (then_stmt_ret, else_stmt_ret) {
@@ -530,7 +557,7 @@ impl Stmt {
                 let body_ret = {
                     let mut body_env = env.new_scope();
                     body_env.declare_variable(elem_name.clone(), elem_type.clone())?;
-                    body.type_check(&mut body_env)?
+                    body.type_check(&mut body_env, allowed_ret_type)?
                 };
                 Ok(body_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
             }
