@@ -11,7 +11,7 @@ struct ParseError;
 fn main() -> Result<(), ParseError> {
     let filename = std::env::args().nth(1).expect("Filename arg missing");
 
-    let (mut parser, was_error, _) = build_parser(&filename);
+    let (mut parser, was_error) = build_parser(&filename);
     let antlr_ast: Rc<ProgramContextAll<'_>> = parser.program().unwrap();
 
     if was_error.get() {

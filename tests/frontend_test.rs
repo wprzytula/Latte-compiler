@@ -9,7 +9,7 @@ use latte::frontend::{
 struct ParseError;
 
 fn parse_file<P: AsRef<Path>>(filename: P) -> Result<(), ParseError> {
-    let (mut parser, was_error, _) = build_parser(&filename);
+    let (mut parser, was_error) = build_parser(&filename);
     let ast = parser.program().unwrap();
 
     if was_error.get() {
@@ -85,7 +85,7 @@ fn lattests_parse() {
 }
 
 fn typecheck_file<P: AsRef<Path>>(filename: P) -> Result<(), TypeCheckError> {
-    let (mut parser, was_error, _) = build_parser(&filename);
+    let (mut parser, was_error) = build_parser(&filename);
     let ast = parser.program().unwrap();
 
     if was_error.get() {

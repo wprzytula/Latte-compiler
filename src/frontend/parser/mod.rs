@@ -20,13 +20,11 @@ use antlr_rust::{ErrorStrategy, Parser};
 use better_any::{Tid, TidAble};
 pub use lattelexer::LatteLexer;
 pub use latteparser::LatteParser;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::fs;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 
 use self::latteparser::ProgramContextAll;
 
@@ -111,31 +109,23 @@ pub fn build_parser<'f, P: AsRef<Path>>(
         MyErrorStrategy<'_, latteparser::LatteParserContextType>,
     >,
     Rc<Cell<bool>>,
-    IntervalDisplayer,
 ) {
-    // println!("{}", path.as_ref().to_str().unwrap());
-    let input = fs::read_to_string(path).expect("Something went wrong reading the file");
+    let input = fs::read_to_string(path).expect("ERROR\nSomething went wrong reading the file");
     let was_error = Rc::new(Cell::new(false));
 
     let mut lexer = LatteLexer::new_with_token_factory(
         InputStream::new_owned(input.clone().into_boxed_str()),
         &TF,
     );
-    // lexer.remove_error_listeners();
     lexer.add_error_listener(Box::new(ReportingErrorListener::new(was_error.clone())));
     let x = lexer.input.as_ref().unwrap();
     let s: String = <InputStream<Box<str>> as CharStream<_>>::get_text(x, 0, 70);
-    // println!("{}", s);
 
     let tokens = CommonTokenStream::new(lexer);
-    // println!("{}", tokens.get_all_text());
 
     let strategy = MyErrorStrategy(DefaultErrorStrategy::new());
     let mut parser = LatteParser::with_strategy(tokens, strategy);
-    // parser.remove_error_listeners();
     parser.add_error_listener(Box::new(ReportingErrorListener::new(was_error.clone())));
 
-    let interval_displayer =
-        IntervalDisplayer({ InputStream::new_owned(input.clone().into_boxed_str()) });
-    (parser, was_error, interval_displayer)
+    (parser, was_error)
 }
