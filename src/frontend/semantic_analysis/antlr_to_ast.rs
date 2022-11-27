@@ -390,11 +390,6 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Nonvoid(NonvoidType::TString)
     }
 
-    fn visit_Arr(&mut self, ctx: &ArrContext<'input>) -> Self::Return {
-        let elem_type = self.visit_children(ctx).into_nonvoid().unwrap();
-        Self::Return::Nonvoid(NonvoidType::TArr(Box::new(elem_type)))
-    }
-
     fn visit_Bool(&mut self, ctx: &BoolContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
         Self::Return::Nonvoid(NonvoidType::TBoolean)
@@ -422,10 +417,6 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     fn visit_NBool(&mut self, ctx: &NBoolContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
         Self::Return::NewType(NewType::TBoolean)
-    }
-
-    fn visit_NArr(&mut self, ctx: &NArrContext<'input>) -> Self::Return {
-        todo!()
     }
 
     fn visit_NClass(&mut self, ctx: &NClassContext<'input>) -> Self::Return {
@@ -609,5 +600,37 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
             _ => unreachable!(),
         };
         Self::Return::BinOp(op)
+    }
+
+    fn visit_IntArr(&mut self, ctx: &IntArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    fn visit_StrArr(&mut self, ctx: &StrArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    fn visit_BooleanArr(&mut self, ctx: &BooleanArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    fn visit_ClassArr(&mut self, ctx: &ClassArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    fn visit_NIntArr(&mut self, ctx: &NIntArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    fn visit_NStrArr(&mut self, ctx: &NStrArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    fn visit_NBooleanArr(&mut self, ctx: &NBooleanArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    fn visit_NClassArr(&mut self, ctx: &NClassArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
     }
 }

@@ -3,7 +3,7 @@ use smallvec::SmallVec;
 use std::{
     borrow::Cow,
     cell::Ref,
-    fmt::{self, Display},
+    fmt::{self, Display, Write},
     ops::Deref,
     rc::Rc,
 };
@@ -117,12 +117,24 @@ pub enum NonvoidType {
     TInt,
     TString,
     TBoolean,
-    TArr(Box<NonvoidType>),
     Class(Ident),
+    TIntArr,
+    TStringArr,
+    TBooleanArr,
+    TClassArr(Ident),
 }
 impl Display for NonvoidType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "") // FIXME
+        match self {
+            NonvoidType::TInt => write!(f, "int"),
+            NonvoidType::TString => write!(f, "string"),
+            NonvoidType::TBoolean => write!(f, "boolean"),
+            NonvoidType::Class(id) => write!(f, "{}", id),
+            NonvoidType::TIntArr => write!(f, "int[]"),
+            NonvoidType::TStringArr => write!(f, "string[]"),
+            NonvoidType::TBooleanArr => write!(f, "boolean[]"),
+            NonvoidType::TClassArr(id) => write!(f, "{}[]", id),
+        }
     }
 }
 
@@ -130,6 +142,14 @@ impl Display for NonvoidType {
 pub enum DataType {
     TVoid,
     Nonvoid(NonvoidType),
+}
+impl Display for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DataType::TVoid => f.write_str("void"),
+            DataType::Nonvoid(n) => n.fmt(f),
+        }
+    }
 }
 
 impl From<NonvoidType> for DataType {
@@ -154,13 +174,62 @@ impl PartialEq<NonvoidType> for DataType {
     }
 }
 
+pub struct DisplayArgs<'a>(pub &'a Vec<DataType>);
+impl<'a> Display for DisplayArgs<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_char('(')?;
+        let mut first = true;
+        for arg in self.0 {
+            if !first {
+                f.write_str(", ")?;
+            }
+            arg.fmt(f)?;
+            first = false;
+        }
+        f.write_char(')')
+    }
+}
+
+pub struct DisplayParams<'a>(pub &'a Vec<NonvoidType>);
+impl<'a> Display for DisplayParams<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_char('(')?;
+        let mut first = true;
+        for arg in self.0 {
+            if !first {
+                f.write_str(", ")?;
+            }
+            arg.fmt(f)?;
+            first = false;
+        }
+        f.write_char(')')
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum NewType {
     TInt,
     TString,
     TBoolean,
-    TArr(Box<NonvoidType>, Int),
+    TIntArr(Int),
+    TStringArr(Int),
+    TBooleanArr(Int),
+    TClassArr(Ident, Int),
     Class(Ident),
+}
+impl Display for NewType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NewType::TInt => write!(f, "int"),
+            NewType::TString => write!(f, "string"),
+            NewType::TBoolean => write!(f, "boolean"),
+            NewType::Class(id) => write!(f, "{}", id),
+            NewType::TIntArr(len) => write!(f, "int[{}]", len),
+            NewType::TStringArr(len) => write!(f, "string[{}]", len),
+            NewType::TBooleanArr(len) => write!(f, "boolean[{}]", len),
+            NewType::TClassArr(id, len) => write!(f, "{}[{}]", id, len),
+        }
+    }
 }
 
 pub type RetType = DataType;

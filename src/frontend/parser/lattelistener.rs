@@ -385,6 +385,66 @@ pub trait LatteListener<'input>: ParseTreeListener<'input, LatteParserContextTyp
      */
     fn exit_Nonvoid(&mut self, _ctx: &NonvoidContext<'input>) {}
     /**
+     * Enter a parse tree produced by the {@code IntArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn enter_IntArr(&mut self, _ctx: &IntArrContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code IntArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn exit_IntArr(&mut self, _ctx: &IntArrContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code StrArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn enter_StrArr(&mut self, _ctx: &StrArrContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code StrArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn exit_StrArr(&mut self, _ctx: &StrArrContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code BooleanArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn enter_BooleanArr(&mut self, _ctx: &BooleanArrContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code BooleanArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn exit_BooleanArr(&mut self, _ctx: &BooleanArrContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code ClassArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn enter_ClassArr(&mut self, _ctx: &ClassArrContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code ClassArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn exit_ClassArr(&mut self, _ctx: &ClassArrContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code Int}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn enter_Int(&mut self, _ctx: &IntContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code Int}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn exit_Int(&mut self, _ctx: &IntContext<'input>) {}
+    /**
      * Enter a parse tree produced by the {@code Str}
      * labeled alternative in {@link LatteParser#nonvoid_type}.
      * @param ctx the parse tree
@@ -396,18 +456,6 @@ pub trait LatteListener<'input>: ParseTreeListener<'input, LatteParserContextTyp
      * @param ctx the parse tree
      */
     fn exit_Str(&mut self, _ctx: &StrContext<'input>) {}
-    /**
-     * Enter a parse tree produced by the {@code Arr}
-     * labeled alternative in {@link LatteParser#nonvoid_type}.
-     * @param ctx the parse tree
-     */
-    fn enter_Arr(&mut self, _ctx: &ArrContext<'input>) {}
-    /**
-     * Exit a parse tree produced by the {@code Arr}
-     * labeled alternative in {@link LatteParser#nonvoid_type}.
-     * @param ctx the parse tree
-     */
-    fn exit_Arr(&mut self, _ctx: &ArrContext<'input>) {}
     /**
      * Enter a parse tree produced by the {@code Bool}
      * labeled alternative in {@link LatteParser#nonvoid_type}.
@@ -433,17 +481,53 @@ pub trait LatteListener<'input>: ParseTreeListener<'input, LatteParserContextTyp
      */
     fn exit_Class(&mut self, _ctx: &ClassContext<'input>) {}
     /**
-     * Enter a parse tree produced by the {@code Int}
-     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * Enter a parse tree produced by the {@code NIntArr}
+     * labeled alternative in {@link LatteParser#newtype}.
      * @param ctx the parse tree
      */
-    fn enter_Int(&mut self, _ctx: &IntContext<'input>) {}
+    fn enter_NIntArr(&mut self, _ctx: &NIntArrContext<'input>) {}
     /**
-     * Exit a parse tree produced by the {@code Int}
-     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * Exit a parse tree produced by the {@code NIntArr}
+     * labeled alternative in {@link LatteParser#newtype}.
      * @param ctx the parse tree
      */
-    fn exit_Int(&mut self, _ctx: &IntContext<'input>) {}
+    fn exit_NIntArr(&mut self, _ctx: &NIntArrContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code NStrArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn enter_NStrArr(&mut self, _ctx: &NStrArrContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code NStrArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn exit_NStrArr(&mut self, _ctx: &NStrArrContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code NBooleanArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn enter_NBooleanArr(&mut self, _ctx: &NBooleanArrContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code NBooleanArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn exit_NBooleanArr(&mut self, _ctx: &NBooleanArrContext<'input>) {}
+    /**
+     * Enter a parse tree produced by the {@code NClassArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn enter_NClassArr(&mut self, _ctx: &NClassArrContext<'input>) {}
+    /**
+     * Exit a parse tree produced by the {@code NClassArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn exit_NClassArr(&mut self, _ctx: &NClassArrContext<'input>) {}
     /**
      * Enter a parse tree produced by the {@code NInt}
      * labeled alternative in {@link LatteParser#newtype}.
@@ -480,18 +564,6 @@ pub trait LatteListener<'input>: ParseTreeListener<'input, LatteParserContextTyp
      * @param ctx the parse tree
      */
     fn exit_NBool(&mut self, _ctx: &NBoolContext<'input>) {}
-    /**
-     * Enter a parse tree produced by the {@code NArr}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn enter_NArr(&mut self, _ctx: &NArrContext<'input>) {}
-    /**
-     * Exit a parse tree produced by the {@code NArr}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn exit_NArr(&mut self, _ctx: &NArrContext<'input>) {}
     /**
      * Enter a parse tree produced by the {@code NClass}
      * labeled alternative in {@link LatteParser#newtype}.

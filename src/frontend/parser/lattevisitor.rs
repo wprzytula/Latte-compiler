@@ -298,20 +298,56 @@ pub trait LatteVisitor<'input>: ParseTreeVisitor<'input, LatteParserContextType>
     }
 
     /**
+     * Visit a parse tree produced by the {@code IntArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_IntArr(&mut self, ctx: &IntArrContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code StrArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_StrArr(&mut self, ctx: &StrArrContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code BooleanArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_BooleanArr(&mut self, ctx: &BooleanArrContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code ClassArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_ClassArr(&mut self, ctx: &ClassArrContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code Int}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_Int(&mut self, ctx: &IntContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
      * Visit a parse tree produced by the {@code Str}
      * labeled alternative in {@link LatteParser#nonvoid_type}.
      * @param ctx the parse tree
      */
     fn visit_Str(&mut self, ctx: &StrContext<'input>) {
-        self.visit_children(ctx)
-    }
-
-    /**
-     * Visit a parse tree produced by the {@code Arr}
-     * labeled alternative in {@link LatteParser#nonvoid_type}.
-     * @param ctx the parse tree
-     */
-    fn visit_Arr(&mut self, ctx: &ArrContext<'input>) {
         self.visit_children(ctx)
     }
 
@@ -334,11 +370,38 @@ pub trait LatteVisitor<'input>: ParseTreeVisitor<'input, LatteParserContextType>
     }
 
     /**
-     * Visit a parse tree produced by the {@code Int}
-     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * Visit a parse tree produced by the {@code NIntArr}
+     * labeled alternative in {@link LatteParser#newtype}.
      * @param ctx the parse tree
      */
-    fn visit_Int(&mut self, ctx: &IntContext<'input>) {
+    fn visit_NIntArr(&mut self, ctx: &NIntArrContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code NStrArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn visit_NStrArr(&mut self, ctx: &NStrArrContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code NBooleanArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn visit_NBooleanArr(&mut self, ctx: &NBooleanArrContext<'input>) {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code NClassArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn visit_NClassArr(&mut self, ctx: &NClassArrContext<'input>) {
         self.visit_children(ctx)
     }
 
@@ -366,15 +429,6 @@ pub trait LatteVisitor<'input>: ParseTreeVisitor<'input, LatteParserContextType>
      * @param ctx the parse tree
      */
     fn visit_NBool(&mut self, ctx: &NBoolContext<'input>) {
-        self.visit_children(ctx)
-    }
-
-    /**
-     * Visit a parse tree produced by the {@code NArr}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn visit_NArr(&mut self, ctx: &NArrContext<'input>) {
         self.visit_children(ctx)
     }
 
@@ -883,20 +937,56 @@ pub trait LatteVisitorCompat<'input>:
     }
 
     /**
+     * Visit a parse tree produced by the {@code IntArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_IntArr(&mut self, ctx: &IntArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code StrArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_StrArr(&mut self, ctx: &StrArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code BooleanArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_BooleanArr(&mut self, ctx: &BooleanArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code ClassArr}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_ClassArr(&mut self, ctx: &ClassArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code Int}
+     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * @param ctx the parse tree
+     */
+    fn visit_Int(&mut self, ctx: &IntContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
      * Visit a parse tree produced by the {@code Str}
      * labeled alternative in {@link LatteParser#nonvoid_type}.
      * @param ctx the parse tree
      */
     fn visit_Str(&mut self, ctx: &StrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
-    }
-
-    /**
-     * Visit a parse tree produced by the {@code Arr}
-     * labeled alternative in {@link LatteParser#nonvoid_type}.
-     * @param ctx the parse tree
-     */
-    fn visit_Arr(&mut self, ctx: &ArrContext<'input>) -> Self::Return {
         self.visit_children(ctx)
     }
 
@@ -919,11 +1009,38 @@ pub trait LatteVisitorCompat<'input>:
     }
 
     /**
-     * Visit a parse tree produced by the {@code Int}
-     * labeled alternative in {@link LatteParser#nonvoid_type}.
+     * Visit a parse tree produced by the {@code NIntArr}
+     * labeled alternative in {@link LatteParser#newtype}.
      * @param ctx the parse tree
      */
-    fn visit_Int(&mut self, ctx: &IntContext<'input>) -> Self::Return {
+    fn visit_NIntArr(&mut self, ctx: &NIntArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code NStrArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn visit_NStrArr(&mut self, ctx: &NStrArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code NBooleanArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn visit_NBooleanArr(&mut self, ctx: &NBooleanArrContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
+    /**
+     * Visit a parse tree produced by the {@code NClassArr}
+     * labeled alternative in {@link LatteParser#newtype}.
+     * @param ctx the parse tree
+     */
+    fn visit_NClassArr(&mut self, ctx: &NClassArrContext<'input>) -> Self::Return {
         self.visit_children(ctx)
     }
 
@@ -951,15 +1068,6 @@ pub trait LatteVisitorCompat<'input>:
      * @param ctx the parse tree
      */
     fn visit_NBool(&mut self, ctx: &NBoolContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
-    }
-
-    /**
-     * Visit a parse tree produced by the {@code NArr}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn visit_NArr(&mut self, ctx: &NArrContext<'input>) -> Self::Return {
         self.visit_children(ctx)
     }
 
@@ -1344,13 +1452,33 @@ where
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
-    fn visit_Str(&mut self, ctx: &StrContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_Str(self, ctx);
+    fn visit_IntArr(&mut self, ctx: &IntArrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_IntArr(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
-    fn visit_Arr(&mut self, ctx: &ArrContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_Arr(self, ctx);
+    fn visit_StrArr(&mut self, ctx: &StrArrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_StrArr(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_BooleanArr(&mut self, ctx: &BooleanArrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_BooleanArr(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_ClassArr(&mut self, ctx: &ClassArrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_ClassArr(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_Int(&mut self, ctx: &IntContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_Int(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_Str(&mut self, ctx: &StrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_Str(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
@@ -1364,8 +1492,23 @@ where
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
-    fn visit_Int(&mut self, ctx: &IntContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_Int(self, ctx);
+    fn visit_NIntArr(&mut self, ctx: &NIntArrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_NIntArr(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_NStrArr(&mut self, ctx: &NStrArrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_NStrArr(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_NBooleanArr(&mut self, ctx: &NBooleanArrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_NBooleanArr(self, ctx);
+        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
+    }
+
+    fn visit_NClassArr(&mut self, ctx: &NClassArrContext<'input>) {
+        let result = <Self as LatteVisitorCompat>::visit_NClassArr(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
@@ -1381,11 +1524,6 @@ where
 
     fn visit_NBool(&mut self, ctx: &NBoolContext<'input>) {
         let result = <Self as LatteVisitorCompat>::visit_NBool(self, ctx);
-        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
-    }
-
-    fn visit_NArr(&mut self, ctx: &NArrContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_NArr(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 

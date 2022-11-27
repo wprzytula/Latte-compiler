@@ -38,8 +38,8 @@ pub enum TypeCheckError {
         "{}: Function {} was applied arguments of nonmatching types: expected {}, got {}.",
         pos,
         func,
-        expected,
-        actual
+        DisplayParams(expected),
+        DisplayArgs(actual)
     )]
     WrongArgTypes {
         pos: Pos,
@@ -144,7 +144,7 @@ pub enum TypeCheckError {
     WrongMainRetType(Pos, DataType),
 
     #[error("")]
-    InvalidReturnType(Pos, /* Ident,  */DataType, DataType), // (allowed, attempted)
+    InvalidReturnType(Pos, /* Ident,  */ DataType, DataType), // (allowed, attempted)
 }
 
 impl From<Either<DoubleDeclarationError, MissingDeclarationError>> for TypeCheckError {
@@ -279,7 +279,10 @@ impl FunDef {
                 return Err(TypeCheckError::ArgsInMain(self.pos, self.clone()));
             }
             if !matches!(self.ret_type, DataType::Nonvoid(NonvoidType::TInt)) {
-                return Err(TypeCheckError::WrongMainRetType(self.pos, self.ret_type.clone()));
+                return Err(TypeCheckError::WrongMainRetType(
+                    self.pos,
+                    self.ret_type.clone(),
+                ));
             }
         }
         env.declare_function(self.name.clone(), fun_type)?;
@@ -521,15 +524,16 @@ impl Stmt {
 
             StmtInner::For(elem_type, elem_name, array_expr, body) => {
                 let (iterable_type, _) = array_expr.type_check(env)?;
-                if let DataType::Nonvoid(NonvoidType::TArr(ref x)) = iterable_type {
-                    if **x != *elem_type {
-                        return Err(TypeCheckError::BadForElemType(
-                            self.clone(),
-                            elem_type.clone(),
-                            iterable_type,
-                        ));
-                    }
-                }
+                // if let DataType::Nonvoid(NonvoidType::TInt) = iterable_type {
+                //     if **x != *elem_type {
+                //         return Err(TypeCheckError::BadForElemType(
+                //             self.clone(),
+                //             elem_type.clone(),
+                //             iterable_type,
+                //         ));
+                //     }
+                // }
+                todo!();
                 let body_ret = {
                     let mut body_env = env.new_scope();
                     body_env.declare_variable(elem_name.clone(), elem_type.clone())?;
@@ -831,18 +835,19 @@ impl Expr {
             ExprInner::ArrSub(arr, idx) => {
                 todo!();
                 let (arr_type, _) = arr.type_check(env)?;
-                let elt_type = if let DataType::Nonvoid(NonvoidType::TArr(inner_type)) = arr_type {
-                    *inner_type
-                } else {
-                    return Err(TypeCheckError::BadArrType(arr.deref().clone(), arr_type));
-                };
+                // let elt_type = if let DataType::Nonvoid(NonvoidType::TIntArr) = arr_type {
+                //     // *inner_type
+                //     todo!()
+                // } else {
+                //     return Err(TypeCheckError::BadArrType(arr.deref().clone(), arr_type));
+                // };
 
-                let (idx_type, _) = idx.type_check(env)?;
-                if !matches!(idx_type, DataType::Nonvoid(NonvoidType::TInt)) {
-                    return Err(TypeCheckError::BadArrIndex(idx.deref().clone(), idx_type));
-                }
+                // let (idx_type, _) = idx.type_check(env)?;
+                // if !matches!(idx_type, DataType::Nonvoid(NonvoidType::TInt)) {
+                //     return Err(TypeCheckError::BadArrIndex(idx.deref().clone(), idx_type));
+                // }
 
-                Ok((elt_type.into(), None))
+                // Ok((elt_type.into(), None))
             }
 
             ExprInner::FieldAccess(object, field) => {
@@ -851,7 +856,10 @@ impl Expr {
                 let class = if let DataType::Nonvoid(NonvoidType::Class(name)) = object_type {
                     name
                 } else {
-                    return Err(TypeCheckError::NonObjectFieldAccess(self.clone(), object_type));
+                    return Err(TypeCheckError::NonObjectFieldAccess(
+                        self.clone(),
+                        object_type,
+                    ));
                 };
                 let field_type = env.get_field_type(class, field.clone())?;
 
@@ -868,7 +876,10 @@ impl Expr {
                 let class = if let DataType::Nonvoid(NonvoidType::Class(name)) = object_type {
                     name
                 } else {
-                    return Err(TypeCheckError::NonObjectFieldAccess(self.clone(), object_type));
+                    return Err(TypeCheckError::NonObjectFieldAccess(
+                        self.clone(),
+                        object_type,
+                    ));
                 };
                 let method = env.resolve_method(class, method_name.clone())?;
 
@@ -906,9 +917,10 @@ impl Expr {
                     NewType::TString => DataType::Nonvoid(NonvoidType::TString),
                     NewType::TBoolean => DataType::Nonvoid(NonvoidType::TBoolean),
                     NewType::Class(c) => DataType::Nonvoid(NonvoidType::Class(c.clone())),
-                    NewType::TArr(inner_type, _len) => {
-                        DataType::Nonvoid(NonvoidType::TArr(inner_type.clone()))
-                    }
+                    NewType::TIntArr(_) => todo!(),
+                    NewType::TStringArr(_) => todo!(),
+                    NewType::TBooleanArr(_) => todo!(),
+                    NewType::TClassArr(_, _) => todo!(),
                 };
                 Ok((data_type, None))
             }

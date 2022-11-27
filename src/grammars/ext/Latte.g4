@@ -77,19 +77,25 @@ type_
     ;
     
 nonvoid_type
-    : 'int'             # Int
+    : 'int' '[]'        # IntArr
+    | 'string' '[]'     # StrArr
+    | 'boolean' '[]'    # BooleanArr
+    | ID '[]'           # ClassArr
+    | 'int'             # Int
     | 'string'          # Str
     | 'boolean'         # Bool
-    | nonvoid_type '[]' # Arr
     | ID                # Class
     ;
 
 newtype
-    : 'int'                 # NInt
-    | 'string'              # NStr
-    | 'boolean'             # NBool
-    | type_ '[' expr ']'    # NArr
-    | ID                    # NClass
+    : 'int' '[' expr ']'        # NIntArr
+    | 'string' '[' expr ']'     # NStrArr
+    | 'boolean' '[' expr ']'    # NBooleanArr
+    | ID '[' expr ']'           # NClassArr
+    | 'int'                     # NInt
+    | 'string'                  # NStr
+    | 'boolean'                 # NBool
+    | ID                        # NClass
     ;
 
 expr
