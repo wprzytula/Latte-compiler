@@ -207,25 +207,49 @@ impl PartialEq for Constexpr {
 impl Program {
     pub fn type_check(&self) -> Result<(), TypeCheckError> {
         let mut initial_env = Env::new();
+
+        /* printInt */
         initial_env.declare_function(
             "printInt".to_owned().into(),
             FunType {
-                ret_type: DataType::Nonvoid(NonvoidType::TInt),
+                ret_type: DataType::TVoid,
                 params: vec![NonvoidType::TInt],
             },
         )?;
-        initial_env.declare_function(
-            "printBoolean".to_owned().into(),
-            FunType {
-                ret_type: DataType::Nonvoid(NonvoidType::TBoolean),
-                params: vec![NonvoidType::TBoolean],
-            },
-        )?;
+
+        /* printString */
         initial_env.declare_function(
             "printString".to_owned().into(),
             FunType {
-                ret_type: DataType::Nonvoid(NonvoidType::TString),
+                ret_type: DataType::TVoid,
                 params: vec![NonvoidType::TString],
+            },
+        )?;
+
+        /* error */
+        initial_env.declare_function(
+            "error".to_owned().into(),
+            FunType {
+                ret_type: DataType::TVoid,
+                params: vec![],
+            },
+        )?;
+
+        /* readInt */
+        initial_env.declare_function(
+            "readInt".to_owned().into(),
+            FunType {
+                ret_type: DataType::Nonvoid(NonvoidType::TInt),
+                params: vec![],
+            },
+        )?;
+
+        /* readString */
+        initial_env.declare_function(
+            "readString".to_owned().into(),
+            FunType {
+                ret_type: DataType::Nonvoid(NonvoidType::TString),
+                params: vec![],
             },
         )?;
 
