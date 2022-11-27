@@ -10,8 +10,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TypeCheckError {
-    // UndefinedVariable(Expr, Ident),
-    // UndefinedFunction(Expr, Ident),
     #[error("")]
     WrongFuncArgNum {
         func: Ident,
@@ -208,43 +206,73 @@ impl PartialEq for Constexpr {
 impl Program {
     pub fn type_check(&self) -> Result<(), TypeCheckError> {
         let mut initial_env = Env::new();
-        initial_env.declare_function("printInt".to_owned().into(), FunType {
-             ret_type: DataType::Nonvoid(NonvoidType::TInt),
-              params: vec![NonvoidType::TInt]
-        })?;
-        initial_env.declare_function("printBoolean".to_owned().into(), FunType {
-            ret_type: DataType::Nonvoid(NonvoidType::TBoolean),
-             params: vec![NonvoidType::TBoolean]
-        })?;
-        initial_env.declare_function("printString".to_owned().into(), FunType {
-            ret_type: DataType::Nonvoid(NonvoidType::TString),
-             params: vec![NonvoidType::TString]
-        })?;
+        initial_env.declare_function(
+            "printInt".to_owned().into(),
+            FunType {
+                ret_type: DataType::Nonvoid(NonvoidType::TInt),
+                params: vec![NonvoidType::TInt],
+            },
+        )?;
+        initial_env.declare_function(
+            "printBoolean".to_owned().into(),
+            FunType {
+                ret_type: DataType::Nonvoid(NonvoidType::TBoolean),
+                params: vec![NonvoidType::TBoolean],
+            },
+        )?;
+        initial_env.declare_function(
+            "printString".to_owned().into(),
+            FunType {
+                ret_type: DataType::Nonvoid(NonvoidType::TString),
+                params: vec![NonvoidType::TString],
+            },
+        )?;
 
         self.type_check_with_env(&mut initial_env)
     }
 
     fn type_check_with_env(&self, env: &mut Env) -> Result<(), TypeCheckError> {
-        // First run
+        // First run - declare
         for top_def in self.0.iter() {
             match top_def {
-                TopDef::FunDef(fun_def) => fun_def.type_check(env)?,
+                TopDef::FunDef(fun_def) => fun_def.declare(env)?,
                 TopDef::Class(id, base_id, class_block) => {
                     env.declare_class(id.clone(), base_id.clone())?;
+                    todo!()
                 }
             }
         }
+        
+        // Second run - type check
+        for top_def in self.0.iter() {
+            match top_def {
+                TopDef::FunDef(fun_def) => fun_def.type_check(&mut env.new_scope())?,
+                TopDef::Class(id, base_id, class_block) => {
+                    env.declare_class(id.clone(), base_id.clone())?;
+                    todo!()
+                }
+            }
+        }
+
         Ok(())
     }
 }
 
 impl FunDef {
-    fn type_check(&self, env: &mut Env) -> Result<(), TypeCheckError> {
+    fn declare(&self, env: &mut Env) -> Result<(), TypeCheckError> {
         let fun_type = FunType {
             ret_type: self.ret_type.clone(),
             params: self.params.iter().map(|arg| arg.type_.clone()).collect(),
         };
         env.declare_function(self.name.clone(), fun_type)?;
+        Ok(())
+    }
+    fn type_check(&self, env: &mut Env) -> Result<(), TypeCheckError> {
+        // Add params to env
+        for param in self.params.iter() {
+            env.declare_variable(param.name.clone(), param.type_.clone(), true)?;
+        }
+
 
         let body_ret_type = self.block.type_check(env)?;
         match (&self.ret_type, &body_ret_type) {
@@ -573,9 +601,9 @@ impl Expr {
                                 &DataType::Nonvoid(NonvoidType::TInt),
                             ) = (&expr1_type, &expr2_type)
                             {
-                                let constval_ret = match int_op {
+                                let ret = match int_op {
                                     IntOpType::IntRet(int_ret_op) => {
-                                        if let (
+                                        let constval_ret = if let (
                                             Some(Constexpr::Int(i1)),
                                             Some(Constexpr::Int(i2)),
                                         ) = (constval1, constval2)
@@ -589,10 +617,11 @@ impl Expr {
                                             }))
                                         } else {
                                             None
-                                        }
+                                        };
+                                        (DataType::Nonvoid(NonvoidType::TInt), constval_ret)
                                     }
                                     IntOpType::BoolRet(bool_ret_op) => {
-                                        if let (
+                                        let constval_ret = if let (
                                             Some(Constexpr::Int(i1)),
                                             Some(Constexpr::Int(i2)),
                                         ) = (constval1, constval2)
@@ -605,10 +634,11 @@ impl Expr {
                                             }))
                                         } else {
                                             None
-                                        }
+                                        };
+                                        (DataType::Nonvoid(NonvoidType::TBoolean), constval_ret)
                                     }
                                 };
-                                Ok((DataType::Nonvoid(NonvoidType::TInt), constval_ret))
+                                Ok(ret)
                             } else {
                                 if !matches!(expr1_type, DataType::Nonvoid(NonvoidType::TInt)) {
                                     return Err(TypeCheckError::IntBinOpWrongType(
