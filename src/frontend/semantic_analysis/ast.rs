@@ -87,6 +87,11 @@ impl Deref for Stmt {
         &self.1
     }
 }
+impl Stmt {
+    pub fn pos(&self) -> Pos {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum StmtInner {
@@ -106,7 +111,17 @@ pub enum StmtInner {
 }
 
 #[derive(Debug, Clone)]
-pub enum LVal {
+pub struct LVal(pub Pos, pub LValInner);
+impl Deref for LVal {
+    type Target = LValInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.1
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum LValInner {
     Id(Ident),
     LField(Box<LVal>, Ident),
     LArr(Box<LVal>, Expr),
@@ -290,6 +305,11 @@ impl Deref for Expr {
 
     fn deref(&self) -> &Self::Target {
         &self.1
+    }
+}
+impl Expr {
+    pub fn pos(&self) -> Pos {
+        self.0
     }
 }
 

@@ -2,17 +2,16 @@ use std::ops::Deref;
 
 use super::{
     ast::*,
-    env::{DoubleDeclarationError, Env, FunType, MissingDeclarationError},
+    env::{Env, FunType},
 };
 
-use either::Either;
 use enum_as_inner::EnumAsInner;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TypeCheckError {
     #[error(
-        "{}: Function {} was applied {} arguments, but expected {}.",
+        "{}: Function {} was applied {} argument(s), but expected {}.",
         pos,
         func,
         actual,
@@ -48,29 +47,23 @@ pub enum TypeCheckError {
         actual: Vec<DataType>,
     },
 
-    #[error("")]
+    #[error("{}: Incompatible type of Neg operation operand: {1}", .0.pos())]
     NegWrongType(Expr, DataType),
 
-    #[error("")]
+    #[error("{}: Incompatible type of Not operation operand: {1}", .0.pos())]
     NotWrongType(Expr, DataType),
 
-    #[error("")]
-    MulWrongType(Expr, DataType),
-
-    #[error("")]
+    #[error("{}: Incompatible type of Add operation operands: {1}, {2}", .0.pos())]
     AddWrongTypes(Expr, DataType, DataType),
 
-    #[error("")]
-    RelWrongType(Expr, DataType),
-
-    #[error("")]
+    #[error("{0}: Incompatible types of Eq/NEq operation operands: {2}, {5}")]
     EqWrongTypes(Pos, Expr, DataType, BinOpType, Expr, DataType),
 
-    #[error("")]
+    #[error("No main function")]
     NoMain,
 
-    #[error("")]
-    ArgsInMain(Pos, FunDef),
+    #[error("Main function must have no parameters")]
+    ParamsInMain(Pos, FunDef),
 
     #[error("")]
     RepeatedParams(FunDef), // currently served by DoubleDeclaration
@@ -81,54 +74,34 @@ pub enum TypeCheckError {
     #[error("")]
     ReturnTypeMismatch(FunDef, RetType, RetType), // unused?
 
-    #[error("")]
+    #[error("{}: Incompatible type for initialising data of type {3}: {4}", .0.pos())]
     IncompatibleInitialization(Stmt, Expr, Ident, NonvoidType, DataType),
 
-    #[error("")]
+    #[error("{}: Incompatible type for assigning value to data of type {3}: {4}", .0.pos())]
     IncompatibleAssignment(Stmt, Expr, LVal, NonvoidType, DataType),
 
-    #[error("")]
+    #[error("{}: Cannot increment data of type {2}", .0.pos())]
     IncompatibleIncrementation(Stmt, LVal, NonvoidType),
 
-    #[error("")]
+    #[error("{}: Cannot decrement data of type {2}", .0.pos())]
     IncompatibleDecrementation(Stmt, LVal, NonvoidType),
 
-    #[error("")]
+    #[error("{}: Bad condition type: {2}", .0.pos())]
     WrongConditionType(Stmt, Expr, DataType),
 
-    // #[error("")]
-    // PossibleNonReturn {
-    //     surr: Stmt,
-    //     if_br: Stmt,
-    //     if_ret: StmtRetType,
-    //     else_br: Stmt,
-    //     else_ret: StmtRetType,
-    // },
-    #[error("")]
-    IncompatibleBranchesType {
-        surr: Stmt,
-        stmt1: Stmt,
-        stmt1_ret_type: StmtRetType,
-        stmt2: Stmt,
-        stmt2_ret_type: StmtRetType,
-    },
+    #[error("{}: Possible non return from non-void function {}", .0.pos, .0.name)]
+    PossibleNonReturnFromFunction(FunDef),
 
-    #[error("")]
-    IncompatibleRetTypesInFunction(FunDef, DataType, Block, StmtRetType),
-
-    #[error(transparent)] // FIXME
-    MissingDeclaration(#[from] MissingDeclarationError),
-
-    #[error("")]
-    DoubleDeclaration(#[from] DoubleDeclarationError),
+    #[error("{}: Incompatible type returned from function: expected {1}, got {3}", .0.pos)]
+    IncompatibleRetTypesInFunction(FunDef, DataType, Block, DataType),
 
     #[error("")]
     BadForElemType(Stmt, NonvoidType, DataType),
 
-    #[error("")]
+    #[error("{}: Bad type for binary operation over Ints: {1}", .0.pos())]
     IntBinOpWrongType(Expr, DataType),
 
-    #[error("")]
+    #[error("{}: Bad type for logical operation: {1}", .0.pos())]
     LogOpWrongType(Expr, DataType),
 
     #[error("")]
@@ -140,20 +113,26 @@ pub enum TypeCheckError {
     #[error("")]
     NonObjectFieldAccess(Expr, DataType), // TODO
 
-    #[error("")]
+    #[error("{}: Bad return type for main function: {1}", .0)]
     WrongMainRetType(Pos, DataType),
 
-    #[error("")]
-    InvalidReturnType(Pos, /* Ident,  */ DataType, DataType), // (allowed, attempted)
-}
+    #[error("{0}: Returning {2} in function declared to return {1}")]
+    InvalidReturnType(Pos, /* Ident,  */ DataType, DataType),
 
-impl From<Either<DoubleDeclarationError, MissingDeclarationError>> for TypeCheckError {
-    fn from(e: Either<DoubleDeclarationError, MissingDeclarationError>) -> Self {
-        match e {
-            Either::Left(de) => de.into(),
-            Either::Right(me) => me.into(),
-        }
-    }
+    #[error("{}: Multiple definitions of function {}", .0.pos, .0.name)]
+    MultipleFunctionDefinition(FunDef),
+
+    #[error("{}: Multiple declarations of variable {}", .0.pos(), .1)]
+    MultipleVariableDeclaration(Stmt, Ident),
+
+    #[error("{}: Multiple parameters in function {} have same name: {}", .0.pos, .0.name, 1)]
+    RepeatedParamsNames(FunDef, Ident),
+
+    #[error("{0}: Attempted to access undeclared variable {1}")]
+    UndeclaredVariableAccess(Pos, Ident),
+
+    #[error("{0}: Attempted to call undefined function {1}")]
+    UndefinedFunctionCall(Pos, Ident),
 }
 
 #[derive(Debug, EnumAsInner)]
@@ -190,49 +169,59 @@ impl Program {
         let mut initial_env = Env::new();
 
         /* printInt */
-        initial_env.declare_function(
-            "printInt".to_owned().into(),
-            FunType {
-                ret_type: DataType::TVoid,
-                params: vec![NonvoidType::TInt],
-            },
-        )?;
+        initial_env
+            .declare_function(
+                "printInt".to_owned().into(),
+                FunType {
+                    ret_type: DataType::TVoid,
+                    params: vec![NonvoidType::TInt],
+                },
+            )
+            .unwrap();
 
         /* printString */
-        initial_env.declare_function(
-            "printString".to_owned().into(),
-            FunType {
-                ret_type: DataType::TVoid,
-                params: vec![NonvoidType::TString],
-            },
-        )?;
+        initial_env
+            .declare_function(
+                "printString".to_owned().into(),
+                FunType {
+                    ret_type: DataType::TVoid,
+                    params: vec![NonvoidType::TString],
+                },
+            )
+            .unwrap();
 
         /* error */
-        initial_env.declare_function(
-            "error".to_owned().into(),
-            FunType {
-                ret_type: DataType::TVoid,
-                params: vec![],
-            },
-        )?;
+        initial_env
+            .declare_function(
+                "error".to_owned().into(),
+                FunType {
+                    ret_type: DataType::TVoid,
+                    params: vec![],
+                },
+            )
+            .unwrap();
 
         /* readInt */
-        initial_env.declare_function(
-            "readInt".to_owned().into(),
-            FunType {
-                ret_type: DataType::Nonvoid(NonvoidType::TInt),
-                params: vec![],
-            },
-        )?;
+        initial_env
+            .declare_function(
+                "readInt".to_owned().into(),
+                FunType {
+                    ret_type: DataType::Nonvoid(NonvoidType::TInt),
+                    params: vec![],
+                },
+            )
+            .unwrap();
 
         /* readString */
-        initial_env.declare_function(
-            "readString".to_owned().into(),
-            FunType {
-                ret_type: DataType::Nonvoid(NonvoidType::TString),
-                params: vec![],
-            },
-        )?;
+        initial_env
+            .declare_function(
+                "readString".to_owned().into(),
+                FunType {
+                    ret_type: DataType::Nonvoid(NonvoidType::TString),
+                    params: vec![],
+                },
+            )
+            .unwrap();
 
         self.type_check_with_env(&mut initial_env)
     }
@@ -243,7 +232,7 @@ impl Program {
             match top_def {
                 TopDef::FunDef(fun_def) => fun_def.declare(env)?,
                 TopDef::Class(id, base_id, class_block) => {
-                    env.declare_class(id.clone(), base_id.clone())?;
+                    // env.declare_class(id.clone(), base_id.clone())?;
                     todo!()
                 }
             }
@@ -258,7 +247,7 @@ impl Program {
             match top_def {
                 TopDef::FunDef(fun_def) => fun_def.type_check(&mut env.new_scope())?,
                 TopDef::Class(id, base_id, class_block) => {
-                    env.declare_class(id.clone(), base_id.clone())?;
+                    // env.declare_class(id.clone(), base_id.clone())?;
                     todo!()
                 }
             }
@@ -276,7 +265,7 @@ impl FunDef {
         };
         if self.name.deref() == "main" {
             if !self.params.is_empty() {
-                return Err(TypeCheckError::ArgsInMain(self.pos, self.clone()));
+                return Err(TypeCheckError::ParamsInMain(self.pos, self.clone()));
             }
             if !matches!(self.ret_type, DataType::Nonvoid(NonvoidType::TInt)) {
                 return Err(TypeCheckError::WrongMainRetType(
@@ -285,19 +274,24 @@ impl FunDef {
                 ));
             }
         }
-        env.declare_function(self.name.clone(), fun_type)?;
+        env.declare_function(self.name.clone(), fun_type)
+            .map_err(|_| TypeCheckError::MultipleFunctionDefinition(self.clone()))?;
         Ok(())
     }
     fn type_check(&self, env: &mut Env) -> Result<(), TypeCheckError> {
         // Add params to env
         for param in self.params.iter() {
-            env.declare_variable(param.name.clone(), param.type_.clone())?;
+            env.declare_variable(param.name.clone(), param.type_.clone())
+                .map_err(|_| {
+                    TypeCheckError::RepeatedParamsNames(self.clone(), param.name.clone())
+                })?;
         }
 
         let body_ret_type = self.block.type_check(env, &self.ret_type)?;
         match (&self.ret_type, &body_ret_type) {
             (&DataType::TVoid, &None) | (&DataType::TVoid, &Some((DataType::TVoid, _))) => Ok(()), // Void return fulfilled
-            (&DataType::Nonvoid(ref expected), &Some((DataType::Nonvoid(ref actual), true))) if expected == actual => Ok(()), // Matching nonvoid return
+            (&DataType::Nonvoid(ref expected), &Some((DataType::Nonvoid(ref got), true))) if expected == got => Ok(()), // Matching nonvoid return
+            (&DataType::Nonvoid(ref expected), &Some((ref got, false))) if expected == got => Err(TypeCheckError::PossibleNonReturnFromFunction(self.clone())),
             (&DataType::Nonvoid(_), &None) | // Expected Nonvoid return, got void
             (&DataType::Nonvoid(_), &Some((_, false))) | // Expected Nonvoid return, got possible void
             (&DataType::TVoid, _) | // Expected Void return, got possible different
@@ -306,7 +300,7 @@ impl FunDef {
                 self.clone(),
                 self.ret_type.clone(),
                 self.block.clone(),
-                body_ret_type,
+                body_ret_type.map(|(ret, _)| ret).unwrap_or(DataType::TVoid),
             )),
         }
     }
@@ -370,7 +364,13 @@ impl Stmt {
                             ));
                         }
                     }
-                    env.declare_variable(single_decl.name.clone(), decl.type_.clone())?;
+                    env.declare_variable(single_decl.name.clone(), decl.type_.clone())
+                        .map_err(|_| {
+                            TypeCheckError::MultipleVariableDeclaration(
+                                self.clone(),
+                                single_decl.name.clone(),
+                            )
+                        })?;
                 }
                 Ok(None)
             }
@@ -489,14 +489,8 @@ impl Stmt {
                                     ((typ1, certain1), (typ2, certain2)) if typ1 == typ2 => {
                                         Ok(Some((typ1, certain1 && certain2)))
                                     }
-                                    (then_ret_type, else_ret_type) => {
-                                        Err(TypeCheckError::IncompatibleBranchesType {
-                                            surr: self.clone(),
-                                            stmt1: then_stmt.deref().clone(),
-                                            stmt1_ret_type: Some(then_ret_type),
-                                            stmt2: else_stmt.deref().clone(),
-                                            stmt2_ret_type: Some(else_ret_type),
-                                        })
+                                    (_then_ret_type, _else_ret_type) => {
+                                        unreachable!("This is handled by restricting Returns to a certain type only")
                                     }
                                 }
                             }
@@ -534,12 +528,12 @@ impl Stmt {
                 //     }
                 // }
                 todo!();
-                let body_ret = {
-                    let mut body_env = env.new_scope();
-                    body_env.declare_variable(elem_name.clone(), elem_type.clone())?;
-                    body.type_check(&mut body_env, allowed_ret_type)?
-                };
-                Ok(body_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
+                // let body_ret = {
+                //     let mut body_env = env.new_scope();
+                //     body_env.declare_variable(elem_name.clone(), elem_type.clone())?;
+                //     body.type_check(&mut body_env, allowed_ret_type)?
+                // };
+                // Ok(body_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
             }
         }
     }
@@ -548,10 +542,13 @@ impl Stmt {
 impl LVal {
     fn type_check<'env>(&self, env: &'env Env) -> Result<&'env NonvoidType, TypeCheckError> {
         // (type, init)
-        match self {
-            LVal::Id(id) => env.get_variable_type(id).map_err(|e| e.into()),
-            LVal::LField(_, _) => todo!(),
-            LVal::LArr(_, _) => todo!(),
+        let pos = self.0;
+        match &self.1 {
+            LValInner::Id(id) => env
+                .get_variable_type(id)
+                .map_err(|_| TypeCheckError::UndeclaredVariableAccess(pos, id.clone())),
+            LValInner::LField(_, _) => todo!(),
+            LValInner::LArr(_, _) => todo!(),
         }
     }
 }
@@ -801,12 +798,17 @@ impl Expr {
             },
 
             ExprInner::Id(id) => {
-                let var_type = env.get_variable_type(id)?;
+                let var_type = env
+                    .get_variable_type(id)
+                    .map_err(|_| TypeCheckError::UndeclaredVariableAccess(pos, id.clone()))?;
                 Ok((var_type.clone().into(), None))
             }
 
             ExprInner::FunCall { name, args } => {
-                let func = env.get_function_type(name)?.clone();
+                let func = env
+                    .get_function_type(name)
+                    .map_err(|_| TypeCheckError::UndefinedFunctionCall(pos, name.clone()))?
+                    .clone();
                 if args.len() != func.params.len() {
                     return Err(TypeCheckError::WrongFuncArgNum {
                         pos,
@@ -861,9 +863,9 @@ impl Expr {
                         object_type,
                     ));
                 };
-                let field_type = env.get_field_type(class, field.clone())?;
+                // let field_type = env.get_field_type(class, field.clone())?;
 
-                Ok((field_type.clone().into(), None))
+                // Ok((field_type.clone().into(), None))
             }
 
             ExprInner::MethodCall {
@@ -881,32 +883,32 @@ impl Expr {
                         object_type,
                     ));
                 };
-                let method = env.resolve_method(class, method_name.clone())?;
+                // let method = env.resolve_method(class, method_name.clone())?;
 
-                if args.len() != method.params.len() {
-                    return Err(TypeCheckError::WrongFuncArgNum {
-                        pos,
-                        func: method_name.clone(),
-                        expected: method.params.len(),
-                        actual: args.len(),
-                    });
-                }
+                // if args.len() != method.params.len() {
+                //     return Err(TypeCheckError::WrongFuncArgNum {
+                //         pos,
+                //         func: method_name.clone(),
+                //         expected: method.params.len(),
+                //         actual: args.len(),
+                //     });
+                // }
 
-                let arg_types = args
-                    .iter()
-                    .map(|arg| arg.type_check(env).map(|(t, _)| t))
-                    .collect::<Result<Vec<_>, TypeCheckError>>()?;
+                // let arg_types = args
+                //     .iter()
+                //     .map(|arg| arg.type_check(env).map(|(t, _)| t))
+                //     .collect::<Result<Vec<_>, TypeCheckError>>()?;
 
-                if arg_types != method.params {
-                    return Err(TypeCheckError::WrongArgTypes {
-                        pos,
-                        func: method_name.clone(),
-                        expected: method.params.clone(),
-                        actual: arg_types,
-                    });
-                }
+                // if arg_types != method.params {
+                //     return Err(TypeCheckError::WrongArgTypes {
+                //         pos,
+                //         func: method_name.clone(),
+                //         expected: method.params.clone(),
+                //         actual: arg_types,
+                //     });
+                // }
 
-                Ok((method.ret_type.clone(), None))
+                // Ok((method.ret_type.clone(), None))
             }
 
             ExprInner::Null(data_type) => Ok((data_type.clone().into(), Some(Constexpr::Null))),

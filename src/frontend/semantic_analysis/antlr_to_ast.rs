@@ -364,7 +364,10 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
 
     fn visit_LID(&mut self, ctx: &LIDContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
-        Self::Return::LVal(LVal::Id(ctx.get_text().into()))
+        Self::Return::LVal(LVal(
+            ctx.start().into(),
+            LValInner::Id(ctx.get_text().into()),
+        ))
     }
 
     fn visit_LArr(&mut self, ctx: &LArrContext<'input>) -> Self::Return {
