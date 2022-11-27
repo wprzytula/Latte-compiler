@@ -18,8 +18,11 @@ fn main() -> Result<(), ParseError> {
         return Err(ParseError);
     } else {
         eprintln!("Parsed successfully!");
-        let ast = Program::from(antlr_ast);
-        eprintln!("Converted successfully!\n{:#?}", &ast);
+        let ast = Program::try_from(antlr_ast);
+        match ast {
+            Ok(ast) => eprintln!("Converted successfully!\n{:#?}", &ast),
+            Err(err) => eprintln!("Convertion error!\n{:#?}", &err),
+        }
     }
 
     Ok(())

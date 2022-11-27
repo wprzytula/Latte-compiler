@@ -1,5 +1,6 @@
 #[allow(non_snake_case)]
 use std::rc::Rc;
+use std::{cell::Cell, num::ParseIntError};
 
 use antlr_rust::tree::{ParseTree, ParseTreeVisitorCompat};
 use either::Either;
@@ -10,14 +11,23 @@ use crate::frontend::parser::{latteparser::*, lattevisitor::LatteVisitorCompat};
 
 use super::ast::*;
 
-impl<'input> From<Rc<ProgramContextAll<'input>>> for Program {
-    fn from(antlr_program: Rc<ProgramContextAll<'input>>) -> Self {
-        ConverterVisitor {
+impl<'input> TryFrom<Rc<ProgramContextAll<'input>>> for Program {
+    type Error = ConversionError;
+
+    fn try_from(antlr_program: Rc<ProgramContextAll<'input>>) -> Result<Self, Self::Error> {
+        let mut visitor = ConverterVisitor {
             temp_result: Default::default(),
+            error: None,
+        };
+        let program = visitor
+            .visit_program(&antlr_program)
+            .into_program()
+            .unwrap();
+        if let Some(err) = visitor.error {
+            Err(err)
+        } else {
+            Ok(program)
         }
-        .visit_program(&antlr_program)
-        .into_program()
-        .unwrap()
     }
 }
 
@@ -93,7 +103,9 @@ impl Default for AstElem {
 }
 
 #[derive(Debug)]
-struct ConversionError;
+pub enum ConversionError {
+    ParseInt(ParseIntError),
+}
 
 struct ConversionResult(Result<AstElem, ConversionError>);
 impl From<Result<AstElem, ConversionError>> for ConversionResult {
@@ -114,6 +126,7 @@ impl Default for ConversionResult {
 
 struct ConverterVisitor {
     temp_result: AstElem,
+    error: Option<ConversionError>,
 }
 
 impl<'input> ParseTreeVisitorCompat<'input> for ConverterVisitor {
@@ -445,8 +458,14 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
 
     fn visit_EInt(&mut self, ctx: &EIntContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
-        let int = ctx.get_text().parse::<Int>().unwrap();
-        Self::Return::Expr(Expr::IntLit(int))
+        let int = ctx.get_text().parse::<Int>();
+        match int {
+            Ok(int) => Self::Return::Expr(Expr::IntLit(int)), // just to satisfy the type checker
+            Err(err) => {
+                self.error = Some(ConversionError::ParseInt(err));
+                Self::Return::Expr(Expr::IntLit(0)) // just to satisfy the type checker
+            }
+        }
     }
 
     fn visit_EUnOp(&mut self, ctx: &EUnOpContext<'input>) -> Self::Return {

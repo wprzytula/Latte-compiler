@@ -15,19 +15,24 @@ fn parse_file<P: AsRef<Path>>(filename: P) -> Result<(), ParseError> {
     if was_error.get() {
         return Err(ParseError);
     }
-    let _program = Program::from(ast);
-
-    Ok(())
+    match Program::try_from(ast) {
+        Ok(_) => Ok(()),
+        Err(_) => Err(ParseError),
+    }
 }
 
 #[test]
 fn lattests_parse() {
     let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
 
-    let bad_paths = ["lattests/bad/parse", "wp/bad/parse"];
+    let bad_paths = ["lattests/bad/parse", "wp/bad/parse", "mrjp-tests/bad/parse"];
     let good_paths = [
         "lattests/bad/typecheck",
         "lattests/good",
+        "mrjp-tests/good/basic",
+        "mrjp-tests/bad/semantic",
+        "mrjp-tests/bad/runtime",
+        "mrjp-tests/bad/infinite_loop",
         // "lattests/extensions/arrays1",
         // "lattests/extensions/objects1",
         // "lattests/extensions/objects2",
@@ -78,7 +83,7 @@ fn typecheck_file<P: AsRef<Path>>(filename: P) -> Result<(), TypeCheckError> {
     if was_error.get() {
         panic!("Error while parsing!")
     }
-    let program = Program::from(ast);
+    let program = Program::try_from(ast).unwrap();
     program.type_check()
 }
 
@@ -86,14 +91,19 @@ fn typecheck_file<P: AsRef<Path>>(filename: P) -> Result<(), TypeCheckError> {
 fn lattests_typecheck() {
     let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
 
-    let bad_paths = ["lattests/bad/typecheck", "wp/bad/typecheck"];
+    let bad_paths = [
+        "lattests/bad/typecheck",
+        "wp/bad/typecheck",
+        "mrjp-tests/bad/semantic",
+    ];
     let good_paths = [
         "lattests/good",
-        "lattests/extensions/arrays1",
-        "lattests/extensions/objects1",
-        "lattests/extensions/objects2",
-        "lattests/extensions/struct",
-        "wp/good",
+        "mrjp-tests/good/basic",
+        // "lattests/extensions/arrays1",
+        // "lattests/extensions/objects1",
+        // "lattests/extensions/objects2",
+        // "lattests/extensions/struct",
+        // "wp/good",
     ];
 
     let bad = bad_paths

@@ -318,7 +318,7 @@ impl FunDef {
 
 impl Block {
     fn type_check(&self, env: &mut Env) -> Result<StmtRetType, TypeCheckError> {
-        eprintln!("type checking block: {:#?}", self);
+        // eprintln!("type checking block: {:#?}", self);
         let mut block_ret_type = None;
         for stmt in &self.0 {
             let stmt_ret_type = stmt.type_check(env)?;
@@ -345,7 +345,7 @@ impl Block {
 
 impl Stmt {
     fn type_check(&self, env: &mut Env) -> Result<StmtRetType, TypeCheckError> {
-        eprintln!("type checking stmt: {:#?}", self);
+        // eprintln!("type checking stmt: {:#?}", self);
         match self {
             Stmt::Empty => Ok(None),
 
@@ -529,7 +529,7 @@ impl LVal {
 impl Expr {
     fn type_check(&self, env: &Env) -> Result<(DataType, Option<Constexpr>), TypeCheckError> {
         // (type, consteval)
-        eprintln!("type checking expr: {:#?}", self);
+        // eprintln!("type checking expr: {:#?}", self);
         match self {
             Expr::IntLit(i) => Ok((
                 DataType::Nonvoid(NonvoidType::TInt),
@@ -799,6 +799,7 @@ impl Expr {
             }
 
             Expr::ArrSub(arr, idx) => {
+                todo!();
                 let (arr_type, _) = arr.type_check(env)?;
                 let elt_type = if let DataType::Nonvoid(NonvoidType::TArr(inner_type)) = arr_type {
                     *inner_type
@@ -815,6 +816,7 @@ impl Expr {
             }
 
             Expr::FieldAccess(object, field) => {
+                todo!();
                 let (object_type, _) = object.type_check(env)?;
                 let class = if let DataType::Nonvoid(NonvoidType::Class(name)) = object_type {
                     name
@@ -831,6 +833,7 @@ impl Expr {
                 method_name,
                 args,
             } => {
+                todo!();
                 let (object_type, _) = object.type_check(env)?;
                 let class = if let DataType::Nonvoid(NonvoidType::Class(name)) = object_type {
                     name
@@ -881,7 +884,7 @@ impl Expr {
     }
 }
 
-/* TODO: usage of a variable initialised in both if branches...
+/* TODO:
         circular inheritance
         associativity
 */
