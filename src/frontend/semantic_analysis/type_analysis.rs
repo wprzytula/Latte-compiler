@@ -483,7 +483,11 @@ impl Stmt {
                         ));
                     }
                 }
-                let body_ret = body.type_check(&mut env.new_scope())?;
+                let body_ret = {
+                    let mut body_env = env.new_scope();
+                    body_env.declare_variable(elem_name.clone(), elem_type.clone())?;
+                    body.type_check(&mut body_env)?
+                };
                 Ok(body_ret.map(|(ret, _)| (ret, false))) // ret certainty is lost
             }
         }
@@ -710,7 +714,7 @@ impl Expr {
 
             Expr::Id(id) => {
                 let var_type = env.get_variable_type(id)?;
-                    Ok((var_type.clone().into(), None))
+                Ok((var_type.clone().into(), None))
             }
 
             Expr::FunCall { name, args } => {
