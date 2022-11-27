@@ -25,7 +25,12 @@ fn parse_file<P: AsRef<Path>>(filename: P) -> Result<(), ParseError> {
 fn lattests_parse() {
     let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
 
-    let bad_paths = ["lattests/bad/parse", "wp/bad/parse", "mrjp-tests/bad/parse"];
+    let bad_paths = [
+        "lattests/bad/parse",
+        "wp/bad/parse",
+        "mrjp-tests/bad/parse",
+        "margdoc/bad/parse",
+    ];
     let good_paths = [
         "lattests/bad/typecheck",
         "lattests/good",
@@ -33,6 +38,9 @@ fn lattests_parse() {
         "mrjp-tests/bad/semantic",
         "mrjp-tests/bad/runtime",
         "mrjp-tests/bad/infinite_loop",
+        // "margdoc/good/extensions",
+        "margdoc/bad/semantic",
+        "margdoc/bad/casting",
         // "lattests/extensions/arrays1",
         // "lattests/extensions/objects1",
         // "lattests/extensions/objects2",
@@ -95,6 +103,8 @@ fn lattests_typecheck() {
         "lattests/bad/typecheck",
         "wp/bad/typecheck",
         "mrjp-tests/bad/semantic",
+        "margdoc/bad/semantic",
+        // "margdoc/bad/casting",
     ];
     let good_paths = [
         "lattests/good",
