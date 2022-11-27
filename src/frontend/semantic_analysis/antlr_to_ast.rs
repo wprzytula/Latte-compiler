@@ -1,10 +1,8 @@
-use std::backtrace::Backtrace;
 #[allow(non_snake_case)]
 use std::rc::Rc;
 
 use antlr_rust::{
-    parser::ParserNodeType,
-    tree::{ParseTree, ParseTreeVisitorCompat, VisitChildren},
+    tree::{ParseTree, ParseTreeVisitorCompat},
 };
 use either::Either;
 use enum_as_inner::EnumAsInner;
@@ -446,7 +444,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         let expr1 = expr1.into_expr().unwrap();
         let expr2 = expr2.into_expr().unwrap();
         Self::Return::Expr(Expr::Op(Op::LogOp(
-            LogOpType::And,
+            LogOpType::Or,
             Box::new(expr1),
             Box::new(expr2),
         )))
