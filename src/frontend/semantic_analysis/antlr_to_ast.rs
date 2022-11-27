@@ -1,9 +1,7 @@
 #[allow(non_snake_case)]
 use std::rc::Rc;
 
-use antlr_rust::{
-    tree::{ParseTree, ParseTreeVisitorCompat},
-};
+use antlr_rust::tree::{ParseTree, ParseTreeVisitorCompat};
 use either::Either;
 use enum_as_inner::EnumAsInner;
 use smallvec::{smallvec, SmallVec};
@@ -191,14 +189,9 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     }
 
     fn visit_params(&mut self, ctx: &ParamsContext<'input>) -> Self::Return {
-        let children_return = self.visit_children(ctx);
-        let params = if let Self::Return::Aggregate(aggr) = children_return {
-            aggr.into_iter()
-                .map(|ast_elem| ast_elem.into_param().unwrap())
-                .collect()
-        } else {
-            vec![]
-        };
+        let params = extract_all(self.visit_children(ctx))
+            .map(|ast_elem| ast_elem.into_param().unwrap())
+            .collect();
         Self::Return::Params(params)
     }
 
