@@ -7,7 +7,7 @@ pub mod lattevisitor;
 
 use antlr_rust::char_stream::CharStream;
 use antlr_rust::error_listener::ErrorListener;
-use antlr_rust::errors::ANTLRError;
+use antlr_rust::errors::{ANTLRError, InputMisMatchError};
 use antlr_rust::interval_set::Interval;
 use antlr_rust::parser::ParserNodeType;
 use antlr_rust::recognizer::Recognizer;
@@ -32,7 +32,11 @@ static TF: CommonTokenFactory = CommonTokenFactory;
 
 better_any::tid! { impl<'i,Ctx> TidAble<'i> for MyErrorStrategy<'i,Ctx> where Ctx: ParserNodeType<'i>}
 
-pub struct MyErrorStrategy<'input, Ctx: ParserNodeType<'input>>(DefaultErrorStrategy<'input, Ctx>);
+pub struct MyErrorStrategy<'input, Ctx: ParserNodeType<'input>>(
+    DefaultErrorStrategy<'input, Ctx>,
+    bool,
+    Rc<Cell<bool>>,
+);
 
 impl<'a, T: Parser<'a>> ErrorStrategy<'a, T> for MyErrorStrategy<'a, T::Node> {
     fn reset(&mut self, recognizer: &mut T) {
@@ -43,11 +47,15 @@ impl<'a, T: Parser<'a>> ErrorStrategy<'a, T> for MyErrorStrategy<'a, T::Node> {
         &mut self,
         recognizer: &mut T,
     ) -> Result<<T::TF as antlr_rust::token_factory::TokenFactory<'a>>::Tok, ANTLRError> {
-        self.0.recover_inline(recognizer)
+        Err(ANTLRError::InputMismatchError(InputMisMatchError::new(
+            recognizer,
+        )))
     }
 
     fn recover(&mut self, recognizer: &mut T, e: &ANTLRError) -> Result<(), ANTLRError> {
-        self.0.recover(recognizer, e)
+        Err(ANTLRError::InputMismatchError(InputMisMatchError::new(
+            recognizer,
+        )))
     }
 
     fn sync(&mut self, recognizer: &mut T) -> Result<(), ANTLRError> {
@@ -59,7 +67,11 @@ impl<'a, T: Parser<'a>> ErrorStrategy<'a, T> for MyErrorStrategy<'a, T::Node> {
     }
 
     fn report_error(&mut self, recognizer: &mut T, e: &ANTLRError) {
-        eprintln!("ERROR!");
+        if !self.1 {
+            self.1 = true;
+            self.2.replace(true);
+            eprintln!("ERROR!");
+        }
         self.0.report_error(recognizer, e)
     }
 
@@ -89,17 +101,6 @@ impl<'a, T: Recognizer<'a>> ErrorListener<'a, T> for ReportingErrorListener {
     }
 }
 
-pub struct IntervalDisplayer(InputStream<Box<str>>);
-impl IntervalDisplayer {
-    pub fn display_interval(&self, interval: Interval) -> String {
-        self.display_bounds(interval.a, interval.b)
-    }
-
-    pub fn display_bounds(&self, start: isize, stop: isize) -> String {
-        <InputStream<Box<str>> as CharStream<_>>::get_text(&self.0, 0, 70)
-    }
-}
-
 pub fn build_parser<'f, P: AsRef<Path>>(
     path: &P,
 ) -> (
@@ -118,12 +119,10 @@ pub fn build_parser<'f, P: AsRef<Path>>(
         &TF,
     );
     lexer.add_error_listener(Box::new(ReportingErrorListener::new(was_error.clone())));
-    let x = lexer.input.as_ref().unwrap();
-    let s: String = <InputStream<Box<str>> as CharStream<_>>::get_text(x, 0, 70);
 
     let tokens = CommonTokenStream::new(lexer);
 
-    let strategy = MyErrorStrategy(DefaultErrorStrategy::new());
+    let strategy = MyErrorStrategy(DefaultErrorStrategy::new(), false, was_error.clone());
     let mut parser = LatteParser::with_strategy(tokens, strategy);
     parser.add_error_listener(Box::new(ReportingErrorListener::new(was_error.clone())));
 

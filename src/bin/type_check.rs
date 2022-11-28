@@ -29,7 +29,10 @@ fn main() -> Result<(), Error> {
     let filename = std::env::args().nth(1).expect("Filename arg missing");
 
     let (mut parser, was_error) = build_parser(&filename);
-    let antlr_ast: Rc<ProgramContextAll<'_>> = parser.program().unwrap();
+    let antlr_ast: Rc<ProgramContextAll<'_>> = match parser.program() {
+        Ok(program) => program,
+        Err(_) => return Err(Error::Parse),
+    };
 
     if was_error.get() {
         return Err(Error::Parse);

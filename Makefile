@@ -1,7 +1,12 @@
-all: latc_x86_64
+# all: latc_x86_64
+all: frontend
+
+frontend: cargo_clean
+	cargo build --release --bin type_check
+	cp target/release/type_check frontend
 
 cargo_clean:
-	cargo clean
+	cargo clean -p latte
 
 latc_x86_64: cargo_clean
 	cargo build --release --bin compiler

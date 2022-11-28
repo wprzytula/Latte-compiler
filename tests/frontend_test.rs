@@ -10,7 +10,11 @@ struct ParseError;
 
 fn parse_file<P: AsRef<Path>>(filename: P) -> Result<(), ParseError> {
     let (mut parser, was_error) = build_parser(&filename);
-    let ast = parser.program().unwrap();
+    let ast = if let Ok(program) = parser.program() {
+        program
+    } else {
+        return Err(ParseError);
+    };
 
     if was_error.get() {
         return Err(ParseError);
@@ -86,7 +90,7 @@ fn lattests_parse() {
 
 fn typecheck_file<P: AsRef<Path>>(filename: P) -> Result<(), TypeCheckError> {
     let (mut parser, was_error) = build_parser(&filename);
-    let ast = parser.program().unwrap();
+    let ast = parser.program().expect("Error while parsing!");
 
     if was_error.get() {
         panic!("Error while parsing!")
