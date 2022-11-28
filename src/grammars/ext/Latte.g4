@@ -28,7 +28,7 @@ classBlock
     ;
 
 classItem
-    : decl                              # Field
+    : nonvoid_type ID                   # Field
     | funDef                            # Method
     ;
 
