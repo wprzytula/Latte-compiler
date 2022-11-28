@@ -1,3 +1,4 @@
+
 use std::num::ParseIntError;
 #[allow(non_snake_case)]
 use std::rc::Rc;
@@ -171,6 +172,11 @@ impl<'input> ParseTreeVisitorCompat<'input> for ConverterVisitor {
 }
 
 impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
+    /**
+     *  Core Latte
+     *  */
+
+    /* Program */
     fn visit_program(&mut self, ctx: &ProgramContext<'input>) -> Self::Return {
         let children_return = self.visit_children(ctx);
         let top_defs = extract_all(children_return)
@@ -179,16 +185,9 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Program(Program(top_defs))
     }
 
+    /* TopDefs */
     fn visit_TopFnDef(&mut self, ctx: &TopFnDefContext<'input>) -> Self::Return {
         self.visit_children(ctx)
-    }
-
-    fn visit_BaseCls(&mut self, ctx: &BaseClsContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_DerivCls(&mut self, ctx: &DerivClsContext<'input>) -> Self::Return {
-        todo!()
     }
 
     fn visit_funDef(&mut self, ctx: &FunDefContext<'input>) -> Self::Return {
@@ -224,18 +223,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         })
     }
 
-    fn visit_classBlock(&mut self, ctx: &ClassBlockContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_Field(&mut self, ctx: &FieldContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_Method(&mut self, ctx: &MethodContext<'input>) -> Self::Return {
-        todo!()
-    }
-
+    /* Decl */
     fn visit_decl(&mut self, ctx: &DeclContext<'input>) -> Self::Return {
         let mut children = extract_all(self.visit_children(ctx));
         let nonvoid = children.next().unwrap().into_nonvoid().unwrap();
@@ -270,6 +258,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         })
     }
 
+    /* Block */
     fn visit_block(&mut self, ctx: &BlockContext<'input>) -> Self::Return {
         let children_return = self.visit_children(ctx);
         let stmts = extract_all(children_return)
@@ -278,6 +267,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Block(Block(ctx.start().into(), stmts))
     }
 
+    /* Stmt */
     fn visit_Empty(&mut self, ctx: &EmptyContext<'input>) -> Self::Return {
         Self::Return::Stmt(Stmt(ctx.start().into(), StmtInner::Empty))
     }
@@ -356,14 +346,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Stmt(Stmt(ctx.start().into(), StmtInner::SExp(expr)))
     }
 
-    fn visit_For(&mut self, ctx: &ForContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_LField(&mut self, ctx: &LFieldContext<'input>) -> Self::Return {
-        todo!()
-    }
-
+    /* LVal */
     fn visit_LID(&mut self, ctx: &LIDContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
         Self::Return::LVal(LVal(
@@ -372,10 +355,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         ))
     }
 
-    fn visit_LArr(&mut self, ctx: &LArrContext<'input>) -> Self::Return {
-        todo!()
-    }
-
+    /* DataType */
     fn visit_Void(&mut self, ctx: &VoidContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
         Self::Return::DataType(DataType::TVoid)
@@ -400,15 +380,12 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Nonvoid(NonvoidType::TBoolean)
     }
 
-    fn visit_Class(&mut self, ctx: &ClassContext<'input>) -> Self::Return {
-        todo!()
-    }
-
     fn visit_Int(&mut self, ctx: &IntContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
         Self::Return::Nonvoid(NonvoidType::TInt)
     }
 
+    /* NewType */
     fn visit_NInt(&mut self, ctx: &NIntContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
         Self::Return::NewType(NewType::TInt)
@@ -424,10 +401,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::NewType(NewType::TBoolean)
     }
 
-    fn visit_NClass(&mut self, ctx: &NClassContext<'input>) -> Self::Return {
-        todo!()
-    }
-
+    /* Expr */
     fn visit_EId(&mut self, ctx: &EIdContext<'input>) -> Self::Return {
         let id = ctx.ID().unwrap().get_text().into();
         Self::Return::Expr(Expr(ctx.start().into(), ExprInner::Id(id)))
@@ -439,29 +413,32 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Expr(Expr(ctx.start().into(), ExprInner::FunCall { name, args }))
     }
 
-    fn visit_ERelOp(&mut self, ctx: &ERelOpContext<'input>) -> Self::Return {
-        let (expr1, bin_op_type, expr2) = extract_3(self.visit_children(ctx));
-        let expr1 = expr1.into_expr().unwrap();
-        let expr2 = expr2.into_expr().unwrap();
-        let op_type = bin_op_type.into_bin_op().unwrap();
-        Self::Return::Expr(Expr(
-            ctx.start().into(),
-            ExprInner::Op(Op::BinOp(op_type, Box::new(expr1), Box::new(expr2))),
-        ))
+    fn visit_args(&mut self, ctx: &ArgsContext<'input>) -> Self::Return {
+        let children_return = self.visit_children(ctx);
+        let args = extract_all(children_return)
+            .map(|ast_elem| Box::new(ast_elem.into_expr().unwrap()))
+            .collect();
+        Self::Return::Args(args)
+    }
+
+    fn visit_arg(&mut self, ctx: &ArgContext<'input>) -> Self::Return {
+        let children_return = self.visit_children(ctx);
+        children_return.as_expr().unwrap();
+        children_return
+    }
+
+    fn visit_EParen(&mut self, ctx: &EParenContext<'input>) -> Self::Return {
+        let children_return = self.visit_children(ctx);
+        children_return.as_expr().unwrap();
+        children_return
     }
 
     fn visit_ETrue(&mut self, ctx: &ETrueContext<'input>) -> Self::Return {
         Self::Return::Expr(Expr(ctx.start().into(), ExprInner::BoolLit(true)))
     }
 
-    fn visit_EOr(&mut self, ctx: &EOrContext<'input>) -> Self::Return {
-        let (expr1, expr2) = extract_2(self.visit_children(ctx));
-        let expr1 = expr1.into_expr().unwrap();
-        let expr2 = expr2.into_expr().unwrap();
-        Self::Return::Expr(Expr(
-            ctx.start().into(),
-            ExprInner::Op(Op::LogOp(LogOpType::Or, Box::new(expr1), Box::new(expr2))),
-        ))
+    fn visit_EFalse(&mut self, ctx: &EFalseContext<'input>) -> Self::Return {
+        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::BoolLit(false)))
     }
 
     fn visit_EInt(&mut self, ctx: &EIntContext<'input>) -> Self::Return {
@@ -477,6 +454,25 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         }
     }
 
+    fn visit_EStr(&mut self, ctx: &EStrContext<'input>) -> Self::Return {
+        assert!(self.visit_children(ctx).is_default());
+        Self::Return::Expr(Expr(
+            ctx.start().into(),
+            ExprInner::StringLit(ctx.get_text()),
+        ))
+    }
+
+    fn visit_ERelOp(&mut self, ctx: &ERelOpContext<'input>) -> Self::Return {
+        let (expr1, bin_op_type, expr2) = extract_3(self.visit_children(ctx));
+        let expr1 = expr1.into_expr().unwrap();
+        let expr2 = expr2.into_expr().unwrap();
+        let op_type = bin_op_type.into_bin_op().unwrap();
+        Self::Return::Expr(Expr(
+            ctx.start().into(),
+            ExprInner::Op(Op::BinOp(op_type, Box::new(expr1), Box::new(expr2))),
+        ))
+    }
+
     fn visit_EUnOp(&mut self, ctx: &EUnOpContext<'input>) -> Self::Return {
         let expr = self.visit_children(ctx).into_expr().unwrap();
         let op = match ctx.get_text().chars().next().unwrap() {
@@ -490,18 +486,6 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         ))
     }
 
-    fn visit_EStr(&mut self, ctx: &EStrContext<'input>) -> Self::Return {
-        assert!(self.visit_children(ctx).is_default());
-        Self::Return::Expr(Expr(
-            ctx.start().into(),
-            ExprInner::StringLit(ctx.get_text()),
-        ))
-    }
-
-    fn visit_EArrSub(&mut self, ctx: &EArrSubContext<'input>) -> Self::Return {
-        todo!()
-    }
-
     fn visit_EMulOp(&mut self, ctx: &EMulOpContext<'input>) -> Self::Return {
         let (expr1, bin_op_type, expr2) = extract_3(self.visit_children(ctx));
         let expr1 = expr1.into_expr().unwrap();
@@ -510,6 +494,16 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Expr(Expr(
             ctx.start().into(),
             ExprInner::Op(Op::BinOp(op_type, Box::new(expr1), Box::new(expr2))),
+        ))
+    }
+
+    fn visit_EOr(&mut self, ctx: &EOrContext<'input>) -> Self::Return {
+        let (expr1, expr2) = extract_2(self.visit_children(ctx));
+        let expr1 = expr1.into_expr().unwrap();
+        let expr2 = expr2.into_expr().unwrap();
+        Self::Return::Expr(Expr(
+            ctx.start().into(),
+            ExprInner::Op(Op::LogOp(LogOpType::Or, Box::new(expr1), Box::new(expr2))),
         ))
     }
 
@@ -523,24 +517,6 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         ))
     }
 
-    fn visit_EParen(&mut self, ctx: &EParenContext<'input>) -> Self::Return {
-        let children_return = self.visit_children(ctx);
-        children_return.as_expr().unwrap();
-        children_return
-    }
-
-    fn visit_EFalse(&mut self, ctx: &EFalseContext<'input>) -> Self::Return {
-        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::BoolLit(false)))
-    }
-
-    fn visit_EMetCall(&mut self, ctx: &EMetCallContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_ENew(&mut self, ctx: &ENewContext<'input>) -> Self::Return {
-        todo!()
-    }
-
     fn visit_EAddOp(&mut self, ctx: &EAddOpContext<'input>) -> Self::Return {
         let (expr1, bin_op_type, expr2) = extract_3(self.visit_children(ctx));
         let expr1 = expr1.into_expr().unwrap();
@@ -550,29 +526,6 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
             ctx.start().into(),
             ExprInner::Op(Op::BinOp(op_type, Box::new(expr1), Box::new(expr2))),
         ))
-    }
-
-    fn visit_ENull(&mut self, ctx: &ENullContext<'input>) -> Self::Return {
-        let nonvoid = self.visit_children(ctx).into_nonvoid().unwrap();
-        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::Null(nonvoid)))
-    }
-
-    fn visit_EField(&mut self, ctx: &EFieldContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_args(&mut self, ctx: &ArgsContext<'input>) -> Self::Return {
-        let children_return = self.visit_children(ctx);
-        let args = extract_all(children_return)
-            .map(|ast_elem| Box::new(ast_elem.into_expr().unwrap()))
-            .collect();
-        Self::Return::Args(args)
-    }
-
-    fn visit_arg(&mut self, ctx: &ArgContext<'input>) -> Self::Return {
-        let children_return = self.visit_children(ctx);
-        children_return.as_expr().unwrap();
-        children_return
     }
 
     fn visit_addOp(&mut self, ctx: &AddOpContext<'input>) -> Self::Return {
@@ -607,6 +560,37 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::BinOp(op)
     }
 
+    /**
+     *  Latte extensions
+     *  */
+    /* TopDefs */
+    fn visit_BaseCls(&mut self, ctx: &BaseClsContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    fn visit_DerivCls(&mut self, ctx: &DerivClsContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    /* ClassBlock */
+    fn visit_classBlock(&mut self, ctx: &ClassBlockContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    /* Object's fields and methods */
+    fn visit_Field(&mut self, ctx: &FieldContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    fn visit_Method(&mut self, ctx: &MethodContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    /* Array DataTypes */
+    fn visit_Class(&mut self, ctx: &ClassContext<'input>) -> Self::Return {
+        todo!()
+    }
+
     fn visit_IntArr(&mut self, ctx: &IntArrContext<'input>) -> Self::Return {
         self.visit_children(ctx)
     }
@@ -623,6 +607,11 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         self.visit_children(ctx)
     }
 
+    /* Array NewTypes */
+    fn visit_NClass(&mut self, ctx: &NClassContext<'input>) -> Self::Return {
+        todo!()
+    }
+
     fn visit_NIntArr(&mut self, ctx: &NIntArrContext<'input>) -> Self::Return {
         self.visit_children(ctx)
     }
@@ -637,5 +626,41 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
 
     fn visit_NClassArr(&mut self, ctx: &NClassArrContext<'input>) -> Self::Return {
         self.visit_children(ctx)
+    }
+
+    /* Expr */
+    fn visit_ENull(&mut self, ctx: &ENullContext<'input>) -> Self::Return {
+        let nonvoid = self.visit_children(ctx).into_nonvoid().unwrap();
+        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::Null(nonvoid)))
+    }
+
+    fn visit_EField(&mut self, ctx: &EFieldContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    fn visit_EMetCall(&mut self, ctx: &EMetCallContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    fn visit_ENew(&mut self, ctx: &ENewContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    fn visit_EArrSub(&mut self, ctx: &EArrSubContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    /* Stmt */
+    fn visit_For(&mut self, ctx: &ForContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    /* LVal */
+    fn visit_LField(&mut self, ctx: &LFieldContext<'input>) -> Self::Return {
+        todo!()
+    }
+
+    fn visit_LArr(&mut self, ctx: &LArrContext<'input>) -> Self::Return {
+        todo!()
     }
 }
