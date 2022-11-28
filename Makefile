@@ -1,5 +1,6 @@
 # all: latc_x86_64
 all: frontend
+	mv frontend latc_x86_64
 
 frontend: cargo_clean
 	cargo build --release --bin type_check
