@@ -67,7 +67,7 @@ stmt
 
 lval
     : ID                            # LID
-    | <assoc=right> lval '.' ID     # LField
+    | lval '.' ID                   # LField
     | lval '[' expr ']'             # LArr
     ;
 
@@ -113,9 +113,9 @@ expr
     | STR                                       # EStr
     | '(' nonvoid_type ')' 'null'               # ENull
     | '(' expr ')'                              # EParen
-    | <assoc=right> expr '[' expr ']'           # EArrSub
-    | <assoc=right> expr '.' ID                 # EField
-    | <assoc=right> expr '.' ID '(' args ')'    # EMetCall
+    | expr '[' expr ']'                         # EArrSub
+    | expr '.' ID                               # EField
+    | expr '.' ID '(' args ')'                  # EMetCall
     | 'new' newtype                             # ENew
     ;
 
