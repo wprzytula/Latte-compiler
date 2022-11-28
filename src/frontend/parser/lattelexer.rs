@@ -4,149 +4,277 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 use antlr_rust::atn::ATN;
+use antlr_rust::atn_deserializer::ATNDeserializer;
 use antlr_rust::char_stream::CharStream;
+use antlr_rust::dfa::DFA;
+use antlr_rust::error_listener::ErrorListener;
 use antlr_rust::int_stream::IntStream;
 use antlr_rust::lexer::{BaseLexer, Lexer, LexerRecog};
-use antlr_rust::atn_deserializer::ATNDeserializer;
-use antlr_rust::dfa::DFA;
-use antlr_rust::lexer_atn_simulator::{LexerATNSimulator, ILexerATNSimulator};
-use antlr_rust::PredictionContextCache;
-use antlr_rust::recognizer::{Recognizer,Actions};
-use antlr_rust::error_listener::ErrorListener;
-use antlr_rust::TokenSource;
-use antlr_rust::token_factory::{TokenFactory,CommonTokenFactory,TokenAware};
+use antlr_rust::lexer_atn_simulator::{ILexerATNSimulator, LexerATNSimulator};
+use antlr_rust::parser_rule_context::{cast, BaseParserRuleContext, ParserRuleContext};
+use antlr_rust::recognizer::{Actions, Recognizer};
+use antlr_rust::rule_context::{BaseRuleContext, EmptyContext, EmptyCustomRuleContext};
 use antlr_rust::token::*;
-use antlr_rust::rule_context::{BaseRuleContext,EmptyCustomRuleContext,EmptyContext};
-use antlr_rust::parser_rule_context::{ParserRuleContext,BaseParserRuleContext,cast};
-use antlr_rust::vocabulary::{Vocabulary,VocabularyImpl};
+use antlr_rust::token_factory::{CommonTokenFactory, TokenAware, TokenFactory};
+use antlr_rust::vocabulary::{Vocabulary, VocabularyImpl};
+use antlr_rust::PredictionContextCache;
+use antlr_rust::TokenSource;
 
-use antlr_rust::{lazy_static,Tid,TidAble,TidExt};
+use antlr_rust::{lazy_static, Tid, TidAble, TidExt};
 
-use std::sync::Arc;
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
+use std::sync::Arc;
 
+pub const T__0: isize = 1;
+pub const T__1: isize = 2;
+pub const T__2: isize = 3;
+pub const T__3: isize = 4;
+pub const T__4: isize = 5;
+pub const T__5: isize = 6;
+pub const T__6: isize = 7;
+pub const T__7: isize = 8;
+pub const T__8: isize = 9;
+pub const T__9: isize = 10;
+pub const T__10: isize = 11;
+pub const T__11: isize = 12;
+pub const T__12: isize = 13;
+pub const T__13: isize = 14;
+pub const T__14: isize = 15;
+pub const T__15: isize = 16;
+pub const T__16: isize = 17;
+pub const T__17: isize = 18;
+pub const T__18: isize = 19;
+pub const T__19: isize = 20;
+pub const T__20: isize = 21;
+pub const T__21: isize = 22;
+pub const T__22: isize = 23;
+pub const T__23: isize = 24;
+pub const T__24: isize = 25;
+pub const T__25: isize = 26;
+pub const T__26: isize = 27;
+pub const T__27: isize = 28;
+pub const T__28: isize = 29;
+pub const T__29: isize = 30;
+pub const T__30: isize = 31;
+pub const T__31: isize = 32;
+pub const T__32: isize = 33;
+pub const T__33: isize = 34;
+pub const T__34: isize = 35;
+pub const T__35: isize = 36;
+pub const T__36: isize = 37;
+pub const T__37: isize = 38;
+pub const T__38: isize = 39;
+pub const T__39: isize = 40;
+pub const T__40: isize = 41;
+pub const T__41: isize = 42;
+pub const T__42: isize = 43;
+pub const COMMENT: isize = 44;
+pub const MULTICOMMENT: isize = 45;
+pub const INT: isize = 46;
+pub const ID: isize = 47;
+pub const WS: isize = 48;
+pub const STR: isize = 49;
+pub const channelNames: [&'static str; 0 + 2] = ["DEFAULT_TOKEN_CHANNEL", "HIDDEN"];
 
-	pub const T__0:isize=1; 
-	pub const T__1:isize=2; 
-	pub const T__2:isize=3; 
-	pub const T__3:isize=4; 
-	pub const T__4:isize=5; 
-	pub const T__5:isize=6; 
-	pub const T__6:isize=7; 
-	pub const T__7:isize=8; 
-	pub const T__8:isize=9; 
-	pub const T__9:isize=10; 
-	pub const T__10:isize=11; 
-	pub const T__11:isize=12; 
-	pub const T__12:isize=13; 
-	pub const T__13:isize=14; 
-	pub const T__14:isize=15; 
-	pub const T__15:isize=16; 
-	pub const T__16:isize=17; 
-	pub const T__17:isize=18; 
-	pub const T__18:isize=19; 
-	pub const T__19:isize=20; 
-	pub const T__20:isize=21; 
-	pub const T__21:isize=22; 
-	pub const T__22:isize=23; 
-	pub const T__23:isize=24; 
-	pub const T__24:isize=25; 
-	pub const T__25:isize=26; 
-	pub const T__26:isize=27; 
-	pub const T__27:isize=28; 
-	pub const T__28:isize=29; 
-	pub const T__29:isize=30; 
-	pub const T__30:isize=31; 
-	pub const T__31:isize=32; 
-	pub const T__32:isize=33; 
-	pub const T__33:isize=34; 
-	pub const T__34:isize=35; 
-	pub const T__35:isize=36; 
-	pub const T__36:isize=37; 
-	pub const T__37:isize=38; 
-	pub const T__38:isize=39; 
-	pub const T__39:isize=40; 
-	pub const T__40:isize=41; 
-	pub const T__41:isize=42; 
-	pub const T__42:isize=43; 
-	pub const COMMENT:isize=44; 
-	pub const MULTICOMMENT:isize=45; 
-	pub const INT:isize=46; 
-	pub const ID:isize=47; 
-	pub const WS:isize=48; 
-	pub const STR:isize=49;
-	pub const channelNames: [&'static str;0+2] = [
-		"DEFAULT_TOKEN_CHANNEL", "HIDDEN"
-	];
+pub const modeNames: [&'static str; 1] = ["DEFAULT_MODE"];
 
-	pub const modeNames: [&'static str;1] = [
-		"DEFAULT_MODE"
-	];
+pub const ruleNames: [&'static str; 56] = [
+    "T__0",
+    "T__1",
+    "T__2",
+    "T__3",
+    "T__4",
+    "T__5",
+    "T__6",
+    "T__7",
+    "T__8",
+    "T__9",
+    "T__10",
+    "T__11",
+    "T__12",
+    "T__13",
+    "T__14",
+    "T__15",
+    "T__16",
+    "T__17",
+    "T__18",
+    "T__19",
+    "T__20",
+    "T__21",
+    "T__22",
+    "T__23",
+    "T__24",
+    "T__25",
+    "T__26",
+    "T__27",
+    "T__28",
+    "T__29",
+    "T__30",
+    "T__31",
+    "T__32",
+    "T__33",
+    "T__34",
+    "T__35",
+    "T__36",
+    "T__37",
+    "T__38",
+    "T__39",
+    "T__40",
+    "T__41",
+    "T__42",
+    "COMMENT",
+    "MULTICOMMENT",
+    "Letter",
+    "Capital",
+    "Small",
+    "Digit",
+    "INT",
+    "ID_First",
+    "ID",
+    "WS",
+    "STR",
+    "StringCharacters",
+    "StringCharacter",
+];
 
-	pub const ruleNames: [&'static str;56] = [
-		"T__0", "T__1", "T__2", "T__3", "T__4", "T__5", "T__6", "T__7", "T__8", 
-		"T__9", "T__10", "T__11", "T__12", "T__13", "T__14", "T__15", "T__16", 
-		"T__17", "T__18", "T__19", "T__20", "T__21", "T__22", "T__23", "T__24", 
-		"T__25", "T__26", "T__27", "T__28", "T__29", "T__30", "T__31", "T__32", 
-		"T__33", "T__34", "T__35", "T__36", "T__37", "T__38", "T__39", "T__40", 
-		"T__41", "T__42", "COMMENT", "MULTICOMMENT", "Letter", "Capital", "Small", 
-		"Digit", "INT", "ID_First", "ID", "WS", "STR", "StringCharacters", "StringCharacter"
-	];
+pub const _LITERAL_NAMES: [Option<&'static str>; 44] = [
+    None,
+    Some("'class'"),
+    Some("'extends'"),
+    Some("'('"),
+    Some("')'"),
+    Some("','"),
+    Some("'{'"),
+    Some("'}'"),
+    Some("';'"),
+    Some("'='"),
+    Some("'++'"),
+    Some("'--'"),
+    Some("'return'"),
+    Some("'if'"),
+    Some("'else'"),
+    Some("'while'"),
+    Some("'for'"),
+    Some("':'"),
+    Some("'.'"),
+    Some("'['"),
+    Some("']'"),
+    Some("'void'"),
+    Some("'int'"),
+    Some("'[]'"),
+    Some("'string'"),
+    Some("'boolean'"),
+    Some("'-'"),
+    Some("'!'"),
+    Some("'&&'"),
+    Some("'||'"),
+    Some("'true'"),
+    Some("'false'"),
+    Some("'null'"),
+    Some("'new'"),
+    Some("'+'"),
+    Some("'*'"),
+    Some("'/'"),
+    Some("'%'"),
+    Some("'<'"),
+    Some("'<='"),
+    Some("'>'"),
+    Some("'>='"),
+    Some("'=='"),
+    Some("'!='"),
+];
+pub const _SYMBOLIC_NAMES: [Option<&'static str>; 50] = [
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    Some("COMMENT"),
+    Some("MULTICOMMENT"),
+    Some("INT"),
+    Some("ID"),
+    Some("WS"),
+    Some("STR"),
+];
+lazy_static! {
+    static ref _shared_context_cache: Arc<PredictionContextCache> =
+        Arc::new(PredictionContextCache::new());
+    static ref VOCABULARY: Box<dyn Vocabulary> = Box::new(VocabularyImpl::new(
+        _LITERAL_NAMES.iter(),
+        _SYMBOLIC_NAMES.iter(),
+        None
+    ));
+}
 
-
-	pub const _LITERAL_NAMES: [Option<&'static str>;44] = [
-		None, Some("'class'"), Some("'extends'"), Some("'('"), Some("')'"), Some("','"), 
-		Some("'{'"), Some("'}'"), Some("';'"), Some("'='"), Some("'++'"), Some("'--'"), 
-		Some("'return'"), Some("'if'"), Some("'else'"), Some("'while'"), Some("'for'"), 
-		Some("':'"), Some("'.'"), Some("'['"), Some("']'"), Some("'void'"), Some("'int'"), 
-		Some("'[]'"), Some("'string'"), Some("'boolean'"), Some("'-'"), Some("'!'"), 
-		Some("'&&'"), Some("'||'"), Some("'true'"), Some("'false'"), Some("'null'"), 
-		Some("'new'"), Some("'+'"), Some("'*'"), Some("'/'"), Some("'%'"), Some("'<'"), 
-		Some("'<='"), Some("'>'"), Some("'>='"), Some("'=='"), Some("'!='")
-	];
-	pub const _SYMBOLIC_NAMES: [Option<&'static str>;50]  = [
-		None, None, None, None, None, None, None, None, None, None, None, None, 
-		None, None, None, None, None, None, None, None, None, None, None, None, 
-		None, None, None, None, None, None, None, None, None, None, None, None, 
-		None, None, None, None, None, None, None, None, Some("COMMENT"), Some("MULTICOMMENT"), 
-		Some("INT"), Some("ID"), Some("WS"), Some("STR")
-	];
-	lazy_static!{
-	    static ref _shared_context_cache: Arc<PredictionContextCache> = Arc::new(PredictionContextCache::new());
-		static ref VOCABULARY: Box<dyn Vocabulary> = Box::new(VocabularyImpl::new(_LITERAL_NAMES.iter(), _SYMBOLIC_NAMES.iter(), None));
-	}
-
-
-pub type LexerContext<'input> = BaseRuleContext<'input,EmptyCustomRuleContext<'input,LocalTokenFactory<'input> >>;
+pub type LexerContext<'input> =
+    BaseRuleContext<'input, EmptyCustomRuleContext<'input, LocalTokenFactory<'input>>>;
 pub type LocalTokenFactory<'input> = CommonTokenFactory;
 
-type From<'a> = <LocalTokenFactory<'a> as TokenFactory<'a> >::From;
+type From<'a> = <LocalTokenFactory<'a> as TokenFactory<'a>>::From;
 
-pub struct LatteLexer<'input, Input:CharStream<From<'input> >> {
-	base: BaseLexer<'input,LatteLexerActions,Input,LocalTokenFactory<'input>>,
+pub struct LatteLexer<'input, Input: CharStream<From<'input>>> {
+    base: BaseLexer<'input, LatteLexerActions, Input, LocalTokenFactory<'input>>,
 }
 
 antlr_rust::tid! { impl<'input,Input> TidAble<'input> for LatteLexer<'input,Input> where Input:CharStream<From<'input> > }
 
-impl<'input, Input:CharStream<From<'input> >> Deref for LatteLexer<'input,Input>{
-	type Target = BaseLexer<'input,LatteLexerActions,Input,LocalTokenFactory<'input>>;
+impl<'input, Input: CharStream<From<'input>>> Deref for LatteLexer<'input, Input> {
+    type Target = BaseLexer<'input, LatteLexerActions, Input, LocalTokenFactory<'input>>;
 
-	fn deref(&self) -> &Self::Target {
-		&self.base
-	}
+    fn deref(&self) -> &Self::Target {
+        &self.base
+    }
 }
 
-impl<'input, Input:CharStream<From<'input> >> DerefMut for LatteLexer<'input,Input>{
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.base
-	}
+impl<'input, Input: CharStream<From<'input>>> DerefMut for LatteLexer<'input, Input> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.base
+    }
 }
 
-
-impl<'input, Input:CharStream<From<'input> >> LatteLexer<'input,Input>{
+impl<'input, Input: CharStream<From<'input>>> LatteLexer<'input, Input> {
     fn get_rule_names(&self) -> &'static [&'static str] {
         &ruleNames
     }
@@ -162,50 +290,58 @@ impl<'input, Input:CharStream<From<'input> >> LatteLexer<'input,Input>{
         "LatteLexer.g4"
     }
 
-	pub fn new_with_token_factory(input: Input, tf: &'input LocalTokenFactory<'input>) -> Self {
-		antlr_rust::recognizer::check_version("0","3");
-    	Self {
-			base: BaseLexer::new_base_lexer(
-				input,
-				LexerATNSimulator::new_lexer_atnsimulator(
-					_ATN.clone(),
-					_decision_to_DFA.clone(),
-					_shared_context_cache.clone(),
-				),
-				LatteLexerActions{},
-				tf
-			)
-	    }
-	}
+    pub fn new_with_token_factory(input: Input, tf: &'input LocalTokenFactory<'input>) -> Self {
+        antlr_rust::recognizer::check_version("0", "3");
+        Self {
+            base: BaseLexer::new_base_lexer(
+                input,
+                LexerATNSimulator::new_lexer_atnsimulator(
+                    _ATN.clone(),
+                    _decision_to_DFA.clone(),
+                    _shared_context_cache.clone(),
+                ),
+                LatteLexerActions {},
+                tf,
+            ),
+        }
+    }
 }
 
-impl<'input, Input:CharStream<From<'input> >> LatteLexer<'input,Input> where &'input LocalTokenFactory<'input>:Default{
-	pub fn new(input: Input) -> Self{
-		LatteLexer::new_with_token_factory(input, <&LocalTokenFactory<'input> as Default>::default())
-	}
+impl<'input, Input: CharStream<From<'input>>> LatteLexer<'input, Input>
+where
+    &'input LocalTokenFactory<'input>: Default,
+{
+    pub fn new(input: Input) -> Self {
+        LatteLexer::new_with_token_factory(
+            input,
+            <&LocalTokenFactory<'input> as Default>::default(),
+        )
+    }
 }
 
-pub struct LatteLexerActions {
+pub struct LatteLexerActions {}
+
+impl LatteLexerActions {}
+
+impl<'input, Input: CharStream<From<'input>>>
+    Actions<'input, BaseLexer<'input, LatteLexerActions, Input, LocalTokenFactory<'input>>>
+    for LatteLexerActions
+{
 }
 
-impl LatteLexerActions{
+impl<'input, Input: CharStream<From<'input>>> LatteLexer<'input, Input> {}
+
+impl<'input, Input: CharStream<From<'input>>>
+    LexerRecog<'input, BaseLexer<'input, LatteLexerActions, Input, LocalTokenFactory<'input>>>
+    for LatteLexerActions
+{
+}
+impl<'input> TokenAware<'input> for LatteLexerActions {
+    type TF = LocalTokenFactory<'input>;
 }
 
-impl<'input, Input:CharStream<From<'input> >> Actions<'input,BaseLexer<'input,LatteLexerActions,Input,LocalTokenFactory<'input>>> for LatteLexerActions{
-	}
-
-	impl<'input, Input:CharStream<From<'input> >> LatteLexer<'input,Input>{
-
-}
-
-impl<'input, Input:CharStream<From<'input> >> LexerRecog<'input,BaseLexer<'input,LatteLexerActions,Input,LocalTokenFactory<'input>>> for LatteLexerActions{
-}
-impl<'input> TokenAware<'input> for LatteLexerActions{
-	type TF = LocalTokenFactory<'input>;
-}
-
-impl<'input, Input:CharStream<From<'input> >> TokenSource<'input> for LatteLexer<'input,Input>{
-	type TF = LocalTokenFactory<'input>;
+impl<'input, Input: CharStream<From<'input>>> TokenSource<'input> for LatteLexer<'input, Input> {
+    type TF = LocalTokenFactory<'input>;
 
     fn next_token(&mut self) -> <Self::TF as TokenFactory<'input>>::Tok {
         self.base.next_token()
@@ -223,38 +359,30 @@ impl<'input, Input:CharStream<From<'input> >> TokenSource<'input> for LatteLexer
         self.base.get_input_stream()
     }
 
-	fn get_source_name(&self) -> String {
-		self.base.get_source_name()
-	}
+    fn get_source_name(&self) -> String {
+        self.base.get_source_name()
+    }
 
     fn get_token_factory(&self) -> &'input Self::TF {
         self.base.get_token_factory()
     }
 }
 
+lazy_static! {
+    static ref _ATN: Arc<ATN> =
+        Arc::new(ATNDeserializer::new(None).deserialize(_serializedATN.chars()));
+    static ref _decision_to_DFA: Arc<Vec<antlr_rust::RwLock<DFA>>> = {
+        let mut dfa = Vec::new();
+        let size = _ATN.decision_to_state.len();
+        for i in 0..size {
+            dfa.push(DFA::new(_ATN.clone(), _ATN.get_decision_state(i), i as isize).into())
+        }
+        Arc::new(dfa)
+    };
+}
 
-
-	lazy_static! {
-	    static ref _ATN: Arc<ATN> =
-	        Arc::new(ATNDeserializer::new(None).deserialize(_serializedATN.chars()));
-	    static ref _decision_to_DFA: Arc<Vec<antlr_rust::RwLock<DFA>>> = {
-	        let mut dfa = Vec::new();
-	        let size = _ATN.decision_to_state.len();
-	        for i in 0..size {
-	            dfa.push(DFA::new(
-	                _ATN.clone(),
-	                _ATN.get_decision_state(i),
-	                i as isize,
-	            ).into())
-	        }
-	        Arc::new(dfa)
-	    };
-	}
-
-
-
-	const _serializedATN:&'static str =
-		"\x03\u{608b}\u{a72a}\u{8133}\u{b9ed}\u{417c}\u{3be7}\u{7786}\u{5964}\x02\
+const _serializedATN: &'static str =
+    "\x03\u{608b}\u{a72a}\u{8133}\u{b9ed}\u{417c}\u{3be7}\u{7786}\u{5964}\x02\
 		\x33\u{15b}\x08\x01\x04\x02\x09\x02\x04\x03\x09\x03\x04\x04\x09\x04\x04\
 		\x05\x09\x05\x04\x06\x09\x06\x04\x07\x09\x07\x04\x08\x09\x08\x04\x09\x09\
 		\x09\x04\x0a\x09\x0a\x04\x0b\x09\x0b\x04\x0c\x09\x0c\x04\x0d\x09\x0d\x04\
