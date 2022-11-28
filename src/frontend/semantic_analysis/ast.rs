@@ -24,7 +24,7 @@ impl From<Ref<'_, GenericToken<Cow<'_, str>>>> for Pos {
 
 impl Display for Pos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "in line {}, column {}", self.line, self.column)
+        write!(f, "in line {}:{}", self.line, self.column)
     }
 }
 
