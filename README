@@ -1,3 +1,5 @@
+Rust version used: rustc 1.65.0 (897e37553 2022-11-02)
+
 Dependencies:
     - owned_chars simply provides an owned version of chars() iterator.
     - either provides a general purpose sum type, which helped me as it has the following characteristic: if both contained types implement Iterator<Item=T>, then Either does so.
