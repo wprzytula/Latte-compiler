@@ -28,7 +28,7 @@ classBlock
     ;
 
 classItem
-    : nonvoid_type ID                   # Field
+    : nonvoid_type ID ';'               # Field
     | funDef                            # Method
     ;
 
@@ -61,14 +61,18 @@ stmt
     | 'if' '(' expr ')' stmt                        # Cond
     | 'if' '(' expr ')' stmt 'else' stmt            # CondElse
     | 'while' '(' expr ')' stmt                     # While
-    | expr ';'                                      # SExp
     | 'for' '(' nonvoid_type ID ':' expr ')' stmt   # For
+    | expr ';'                                      # SExp
     ;
 
 lval
-    : ID                            # LID
+    : ID '(' args ')'               # LFunCall
+    | lval '.' ID '(' args ')'      # LMetCall
     | lval '.' ID                   # LField
     | lval '[' expr ']'             # LArr
+    | 'new' newtype                 # LNew
+    | ID                            # LID
+    | '(' lval ')'                  # LParen
     ;
 
 type_
@@ -99,24 +103,19 @@ newtype
     ;
 
 expr
-    : ('-'|'!') expr                            # EUnOp
+    : unOp expr                                 # EUnOp
     | expr mulOp expr                           # EMulOp
     | expr addOp expr                           # EAddOp
     | expr relOp expr                           # ERelOp
     | <assoc=right> expr '&&' expr              # EAnd
     | <assoc=right> expr '||' expr              # EOr
-    | ID                                        # EId
     | INT                                       # EInt
     | 'true'                                    # ETrue
     | 'false'                                   # EFalse
-    | ID '(' args ')'                           # EFunCall
     | STR                                       # EStr
     | '(' nonvoid_type ')' 'null'               # ENull
+    | lval                                      # ELVal
     | '(' expr ')'                              # EParen
-    | expr '[' expr ']'                         # EArrSub
-    | expr '.' ID                               # EField
-    | expr '.' ID '(' args ')'                  # EMetCall
-    | 'new' newtype                             # ENew
     ;
 
 args
@@ -126,6 +125,11 @@ args
 
 arg
     : expr
+    ;
+
+unOp
+    : '!'
+    | '-'
     ;
 
 addOp
