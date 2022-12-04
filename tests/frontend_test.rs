@@ -42,14 +42,14 @@ fn lattests_parse() {
         "mrjp-tests/bad/semantic",
         "mrjp-tests/bad/runtime",
         "mrjp-tests/bad/infinite_loop",
-        // "margdoc/good/extensions",
+        "margdoc/good/extensions",
         "margdoc/bad/semantic",
         "margdoc/bad/casting",
-        // "lattests/extensions/arrays1",
-        // "lattests/extensions/objects1",
-        // "lattests/extensions/objects2",
-        // "lattests/extensions/struct",
-        // "wp/good",
+        "lattests/extensions/arrays1",
+        "lattests/extensions/objects1",
+        "lattests/extensions/objects2",
+        "lattests/extensions/struct",
+        "wp/good",
     ];
 
     let bad = bad_paths
@@ -108,16 +108,19 @@ fn lattests_typecheck() {
         "wp/bad/typecheck",
         "mrjp-tests/bad/semantic",
         "margdoc/bad/semantic",
-        // "margdoc/bad/casting",
+        "margdoc/bad/casting",
+        "pp/bad",
     ];
     let good_paths = [
         "lattests/good",
         "mrjp-tests/good/basic",
-        // "lattests/extensions/arrays1",
-        // "lattests/extensions/objects1",
-        // "lattests/extensions/objects2",
-        // "lattests/extensions/struct",
-        // "wp/good",
+        "lattests/extensions/arrays1",
+        "lattests/extensions/objects1",
+        "lattests/extensions/objects2",
+        "lattests/extensions/struct",
+        "wp/good",
+        "margdoc/good/extensions",
+        "pp/good",
     ];
 
     let bad = bad_paths

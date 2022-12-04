@@ -4,11 +4,12 @@ use std::{
     borrow::Cow,
     cell::Ref,
     fmt::{self, Display, Write},
+    hash::{self, Hash},
     ops::Deref,
     rc::Rc,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pos {
     pub line: isize,
     pub column: isize,
@@ -29,14 +30,37 @@ impl Display for Pos {
 }
 
 #[derive(Debug)]
-pub struct Program(pub Vec<TopDef>);
+pub struct Program(pub Vec<FunDef>, pub Vec<ClassDef>);
 
 pub type Int = i64;
 
 #[derive(Debug)]
 pub enum TopDef {
     FunDef(FunDef),
-    Class(Ident, Option<Ident>, ClassBlock), // (class, base_class, block)
+    ClassDef(ClassDef),
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassDef {
+    pub pos: Pos,
+    pub class: Ident,
+    pub base_class: Option<Ident>,
+    pub class_block: ClassBlock,
+}
+
+impl PartialEq for ClassDef {
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos && self.class == other.class
+    }
+}
+
+impl Eq for ClassDef {}
+
+impl Hash for ClassDef {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.pos.hash(state);
+        self.class.hash(state);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -54,13 +78,13 @@ pub struct Param {
     pub name: Ident,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClassBlock(pub Vec<ClassItem>);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ClassItem {
-    Decl(DataDecl),
-    FunDef(FunDef),
+    Field(Pos, NonvoidType, Ident),
+    Method(FunDef),
 }
 
 #[derive(Debug, Clone)]
@@ -119,20 +143,35 @@ impl Deref for LVal {
         &self.1
     }
 }
+impl LVal {
+    pub fn pos(&self) -> Pos {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum LValInner {
     Id(Ident),
-    LField(Box<LVal>, Ident),
-    LArr(Box<LVal>, Expr),
+    FieldAccess(Box<LVal>, Ident),
+    ArrSub(Box<LVal>, Expr),
+    FunCall {
+        name: Ident,
+        args: Vec<Box<Expr>>,
+    },
+    MethodCall {
+        object: Box<LVal>,
+        method_name: Ident,
+        args: Vec<Box<Expr>>,
+    },
+    New(NewType),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum NonvoidType {
     TInt,
     TString,
     TBoolean,
-    Class(Ident),
+    TClass(Ident),
     TIntArr,
     TStringArr,
     TBooleanArr,
@@ -144,7 +183,7 @@ impl Display for NonvoidType {
             NonvoidType::TInt => write!(f, "int"),
             NonvoidType::TString => write!(f, "string"),
             NonvoidType::TBoolean => write!(f, "boolean"),
-            NonvoidType::Class(id) => write!(f, "{}", id),
+            NonvoidType::TClass(id) => write!(f, "{}", id),
             NonvoidType::TIntArr => write!(f, "int[]"),
             NonvoidType::TStringArr => write!(f, "string[]"),
             NonvoidType::TBooleanArr => write!(f, "boolean[]"),
@@ -152,8 +191,29 @@ impl Display for NonvoidType {
         }
     }
 }
+impl NonvoidType {
+    pub fn is_passed_by_ref(&self) -> bool {
+        match self {
+            NonvoidType::TInt | NonvoidType::TString | NonvoidType::TBoolean => false,
+            NonvoidType::TClass(_)
+            | NonvoidType::TIntArr
+            | NonvoidType::TStringArr
+            | NonvoidType::TBooleanArr
+            | NonvoidType::TClassArr(_) => true,
+        }
+    }
+    pub fn array_member_type(&self) -> Option<NonvoidType> {
+        match self {
+            NonvoidType::TIntArr => Some(Self::TInt),
+            NonvoidType::TStringArr => Some(Self::TString),
+            NonvoidType::TBooleanArr => Some(Self::TBoolean),
+            NonvoidType::TClassArr(c) => Some(Self::TClass(c.clone())),
+            _ => None,
+        }
+    }
+}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum DataType {
     TVoid,
     Nonvoid(NonvoidType),
@@ -166,26 +226,24 @@ impl Display for DataType {
         }
     }
 }
-
-impl From<NonvoidType> for DataType {
-    fn from(nonvoid: NonvoidType) -> Self {
-        Self::Nonvoid(nonvoid)
+impl DataType {
+    pub fn is_passed_by_ref(&self) -> bool {
+        match self {
+            DataType::TVoid => false,
+            DataType::Nonvoid(n) => n.is_passed_by_ref(),
+        }
     }
-}
-
-impl PartialEq<DataType> for NonvoidType {
-    fn eq(&self, other: &DataType) -> bool {
-        if let DataType::Nonvoid(nonvoid) = other {
-            self == nonvoid
-        } else {
-            false
+    pub fn array_member_type(&self) -> Option<NonvoidType> {
+        match self {
+            DataType::TVoid => None,
+            DataType::Nonvoid(n) => n.array_member_type(),
         }
     }
 }
 
-impl PartialEq<NonvoidType> for DataType {
-    fn eq(&self, other: &NonvoidType) -> bool {
-        other.eq(self)
+impl From<NonvoidType> for DataType {
+    fn from(nonvoid: NonvoidType) -> Self {
+        Self::Nonvoid(nonvoid)
     }
 }
 
@@ -226,11 +284,11 @@ pub enum NewType {
     TInt,
     TString,
     TBoolean,
-    TIntArr(Int),
-    TStringArr(Int),
-    TBooleanArr(Int),
-    TClassArr(Ident, Int),
-    Class(Ident),
+    TClass(Ident),
+    TIntArr(Box<Expr>),
+    TStringArr(Box<Expr>),
+    TBooleanArr(Box<Expr>),
+    TClassArr(Ident, Box<Expr>),
 }
 impl Display for NewType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -238,11 +296,11 @@ impl Display for NewType {
             NewType::TInt => write!(f, "int"),
             NewType::TString => write!(f, "string"),
             NewType::TBoolean => write!(f, "boolean"),
-            NewType::Class(id) => write!(f, "{}", id),
-            NewType::TIntArr(len) => write!(f, "int[{}]", len),
-            NewType::TStringArr(len) => write!(f, "string[{}]", len),
-            NewType::TBooleanArr(len) => write!(f, "boolean[{}]", len),
-            NewType::TClassArr(id, len) => write!(f, "{}[{}]", id, len),
+            NewType::TClass(id) => write!(f, "{}", id),
+            NewType::TIntArr(len) => write!(f, "int[{:#?}]", len),
+            NewType::TStringArr(len) => write!(f, "string[{:#?}]", len),
+            NewType::TBooleanArr(len) => write!(f, "boolean[{:#?}]", len),
+            NewType::TClassArr(id, len) => write!(f, "{}[{:#?}]", id, len),
         }
     }
 }
@@ -320,22 +378,11 @@ pub enum ExprInner {
     IntLit(Int),
     BoolLit(bool),
     StringLit(String),
-    FunCall {
-        name: Ident,
-        args: Vec<Box<Expr>>,
-    },
-    ArrSub(Box<Expr>, Box<Expr>),
-    FieldAccess(Box<Expr>, Ident),
-    MethodCall {
-        object: Box<Expr>,
-        method_name: Ident,
-        args: Vec<Box<Expr>>,
-    },
     Null(NonvoidType),
-    New(NewType),
+    LVal(Box<LVal>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Ident(Rc<String>);
 impl From<String> for Ident {
     fn from(s: String) -> Self {

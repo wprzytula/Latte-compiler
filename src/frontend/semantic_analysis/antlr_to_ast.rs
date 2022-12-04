@@ -1,4 +1,3 @@
-
 use std::num::ParseIntError;
 #[allow(non_snake_case)]
 use std::rc::Rc;
@@ -84,7 +83,6 @@ enum AstElem {
     Param(Param),
     Params(Vec<Param>),
     Args(Vec<Box<Expr>>),
-    ClassBlock(ClassBlock),
     Decl(DataDecl),
     SingleDecl(SingleDecl),
     Block(Block),
@@ -93,10 +91,14 @@ enum AstElem {
     LVal(LVal),
 
     BinOp(BinOpType),
+    UnOp(UnOpType),
 
     NewType(NewType),
     DataType(DataType),
     Nonvoid(NonvoidType),
+
+    ClassBlock(ClassBlock),
+    ClassItem(ClassItem),
 
     Default,
 }
@@ -179,15 +181,26 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     /* Program */
     fn visit_program(&mut self, ctx: &ProgramContext<'input>) -> Self::Return {
         let children_return = self.visit_children(ctx);
-        let top_defs = extract_all(children_return)
-            .map(|ast_elem| ast_elem.into_top_def().unwrap())
-            .collect();
-        Self::Return::Program(Program(top_defs))
+        let (fun_defs, class_defs) = {
+            let mut fun_defs = vec![];
+            let mut class_defs = vec![];
+            for top_def in
+                extract_all(children_return).map(|ast_elem| ast_elem.into_top_def().unwrap())
+            {
+                match top_def {
+                    TopDef::FunDef(fun_def) => fun_defs.push(fun_def),
+                    TopDef::ClassDef(class_def) => class_defs.push(class_def),
+                }
+            }
+            (fun_defs, class_defs)
+        };
+        Self::Return::Program(Program(fun_defs, class_defs))
     }
 
     /* TopDefs */
     fn visit_TopFnDef(&mut self, ctx: &TopFnDefContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+        let fun_def = self.visit_children(ctx).into_fun_def().unwrap();
+        Self::Return::TopDef(TopDef::FunDef(fun_def))
     }
 
     fn visit_funDef(&mut self, ctx: &FunDefContext<'input>) -> Self::Return {
@@ -198,13 +211,13 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         let block = block.into_block().unwrap();
         let name = ctx.ID().unwrap().symbol.text.clone().into_owned().into();
 
-        Self::Return::TopDef(TopDef::FunDef(FunDef {
+        Self::Return::FunDef(FunDef {
             pos: ctx.start().into(),
             ret_type,
             name,
             params,
             block,
-        }))
+        })
     }
 
     fn visit_params(&mut self, ctx: &ParamsContext<'input>) -> Self::Return {
@@ -355,6 +368,16 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         ))
     }
 
+    fn visit_LFunCall(&mut self, ctx: &LFunCallContext<'input>) -> Self::Return {
+        let name = ctx.ID().unwrap().get_text().into();
+        let args = self.visit_children(ctx).into_args().unwrap();
+        Self::Return::LVal(LVal(ctx.start().into(), LValInner::FunCall { name, args }))
+    }
+
+    fn visit_LParen(&mut self, ctx: &LParenContext<'input>) -> Self::Return {
+        self.visit_children(ctx)
+    }
+
     /* DataType */
     fn visit_Void(&mut self, ctx: &VoidContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
@@ -402,15 +425,9 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     }
 
     /* Expr */
-    fn visit_EId(&mut self, ctx: &EIdContext<'input>) -> Self::Return {
-        let id = ctx.ID().unwrap().get_text().into();
-        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::Id(id)))
-    }
-
-    fn visit_EFunCall(&mut self, ctx: &EFunCallContext<'input>) -> Self::Return {
-        let name = ctx.ID().unwrap().get_text().into();
-        let args = self.visit_children(ctx).into_args().unwrap();
-        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::FunCall { name, args }))
+    fn visit_ELVal(&mut self, ctx: &ELValContext<'input>) -> Self::Return {
+        let e_lval = self.visit_children(ctx).into_l_val().unwrap();
+        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::LVal(Box::new(e_lval))))
     }
 
     fn visit_args(&mut self, ctx: &ArgsContext<'input>) -> Self::Return {
@@ -474,15 +491,12 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     }
 
     fn visit_EUnOp(&mut self, ctx: &EUnOpContext<'input>) -> Self::Return {
-        let expr = self.visit_children(ctx).into_expr().unwrap();
-        let op = match ctx.get_text().chars().next().unwrap() {
-            '!' => UnOpType::Not,
-            '-' => UnOpType::Neg,
-            _ => unreachable!(),
-        };
+        let (un_op_type, expr) = extract_2(self.visit_children(ctx));
+        let un_op_type = un_op_type.into_un_op().unwrap();
+        let expr = expr.into_expr().unwrap();
         Self::Return::Expr(Expr(
             ctx.start().into(),
-            ExprInner::Op(Op::UnOp(op, Box::new(expr))),
+            ExprInner::Op(Op::UnOp(un_op_type, Box::new(expr))),
         ))
     }
 
@@ -528,6 +542,15 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         ))
     }
 
+    fn visit_unOp(&mut self, ctx: &UnOpContext<'input>) -> Self::Return {
+        let op = match ctx.get_text().chars().next().unwrap() {
+            '!' => UnOpType::Not,
+            '-' => UnOpType::Neg,
+            _ => unreachable!(),
+        };
+        Self::Return::UnOp(op)
+    }
+
     fn visit_addOp(&mut self, ctx: &AddOpContext<'input>) -> Self::Return {
         let op = match ctx.get_text().chars().next().unwrap() {
             '+' => BinOpType::Add,
@@ -565,67 +588,101 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
      *  */
     /* TopDefs */
     fn visit_BaseCls(&mut self, ctx: &BaseClsContext<'input>) -> Self::Return {
-        todo!()
+        let class_id = ctx.ID().unwrap().get_text().into();
+        let class_block = self.visit_children(ctx).into_class_block().unwrap();
+
+        let pos = ctx.start().into();
+        Self::Return::TopDef(TopDef::ClassDef(ClassDef {
+            pos,
+            class: class_id,
+            base_class: None,
+            class_block,
+        }))
     }
 
     fn visit_DerivCls(&mut self, ctx: &DerivClsContext<'input>) -> Self::Return {
-        todo!()
+        let class_id = ctx.ID(0).unwrap().get_text().into();
+        let base_id = ctx.ID(1).unwrap().get_text().into();
+        let class_block = self.visit_children(ctx).into_class_block().unwrap();
+
+        let pos = ctx.start().into();
+        Self::Return::TopDef(TopDef::ClassDef(ClassDef {
+            pos,
+            class: class_id,
+            base_class: Some(base_id),
+            class_block,
+        }))
     }
 
     /* ClassBlock */
     fn visit_classBlock(&mut self, ctx: &ClassBlockContext<'input>) -> Self::Return {
-        todo!()
+        let class_items = extract_all(self.visit_children(ctx))
+            .map(|ast_elem| ast_elem.into_class_item().unwrap())
+            .collect();
+        Self::Return::ClassBlock(ClassBlock(class_items))
     }
 
     /* Object's fields and methods */
     fn visit_Field(&mut self, ctx: &FieldContext<'input>) -> Self::Return {
-        todo!()
+        let nonvoid = self.visit_children(ctx).into_nonvoid().unwrap();
+        let id = ctx.ID().unwrap().get_text().into();
+        let pos = ctx.start().into();
+        Self::Return::ClassItem(ClassItem::Field(pos, nonvoid, id))
     }
 
     fn visit_Method(&mut self, ctx: &MethodContext<'input>) -> Self::Return {
-        todo!()
+        let fun_def = self.visit_children(ctx).into_fun_def().unwrap();
+        Self::Return::ClassItem(ClassItem::Method(fun_def))
     }
 
     /* Array DataTypes */
     fn visit_Class(&mut self, ctx: &ClassContext<'input>) -> Self::Return {
-        todo!()
+        let id = ctx.ID().unwrap().get_text().into();
+        Self::Return::Nonvoid(NonvoidType::TClass(id))
     }
 
-    fn visit_IntArr(&mut self, ctx: &IntArrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+    fn visit_IntArr(&mut self, _ctx: &IntArrContext<'input>) -> Self::Return {
+        Self::Return::Nonvoid(NonvoidType::TIntArr)
     }
 
-    fn visit_StrArr(&mut self, ctx: &StrArrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+    fn visit_StrArr(&mut self, _ctx: &StrArrContext<'input>) -> Self::Return {
+        Self::Return::Nonvoid(NonvoidType::TStringArr)
     }
 
-    fn visit_BooleanArr(&mut self, ctx: &BooleanArrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+    fn visit_BooleanArr(&mut self, _ctx: &BooleanArrContext<'input>) -> Self::Return {
+        Self::Return::Nonvoid(NonvoidType::TBooleanArr)
     }
 
     fn visit_ClassArr(&mut self, ctx: &ClassArrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+        let id = ctx.ID().unwrap().get_text().into();
+        Self::Return::Nonvoid(NonvoidType::TClassArr(id))
     }
 
     /* Array NewTypes */
     fn visit_NClass(&mut self, ctx: &NClassContext<'input>) -> Self::Return {
-        todo!()
+        let id = ctx.ID().unwrap().get_text().into();
+        Self::Return::NewType(NewType::TClass(id))
     }
 
     fn visit_NIntArr(&mut self, ctx: &NIntArrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+        let len = self.visit_children(ctx).into_expr().unwrap();
+        Self::Return::NewType(NewType::TIntArr(Box::new(len)))
     }
 
     fn visit_NStrArr(&mut self, ctx: &NStrArrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+        let len = self.visit_children(ctx).into_expr().unwrap();
+        Self::Return::NewType(NewType::TStringArr(Box::new(len)))
     }
 
     fn visit_NBooleanArr(&mut self, ctx: &NBooleanArrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+        let len = self.visit_children(ctx).into_expr().unwrap();
+        Self::Return::NewType(NewType::TBooleanArr(Box::new(len)))
     }
 
     fn visit_NClassArr(&mut self, ctx: &NClassArrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
+        let id = ctx.ID().unwrap().get_text().into();
+        let len = self.visit_children(ctx).into_expr().unwrap();
+        Self::Return::NewType(NewType::TClassArr(id, Box::new(len)))
     }
 
     /* Expr */
@@ -634,33 +691,57 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Expr(Expr(ctx.start().into(), ExprInner::Null(nonvoid)))
     }
 
-    fn visit_EField(&mut self, ctx: &EFieldContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_EMetCall(&mut self, ctx: &EMetCallContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_ENew(&mut self, ctx: &ENewContext<'input>) -> Self::Return {
-        todo!()
-    }
-
-    fn visit_EArrSub(&mut self, ctx: &EArrSubContext<'input>) -> Self::Return {
-        todo!()
-    }
-
     /* Stmt */
     fn visit_For(&mut self, ctx: &ForContext<'input>) -> Self::Return {
-        todo!()
+        let id = ctx.ID().unwrap().get_text().into();
+        let (nonvoid, iterable, body) = extract_3(self.visit_children(ctx));
+        let nonvoid = nonvoid.into_nonvoid().unwrap();
+        let iterable = iterable.into_expr().unwrap();
+        let body = body.into_stmt().unwrap();
+
+        Self::Return::Stmt(Stmt(
+            ctx.start().into(),
+            StmtInner::For(nonvoid, id, iterable, Box::new(body)),
+        ))
     }
 
     /* LVal */
+    fn visit_LNew(&mut self, ctx: &LNewContext<'input>) -> Self::Return {
+        let newtype = self.visit_children(ctx).into_new_type().unwrap();
+        Self::Return::LVal(LVal(ctx.start().into(), LValInner::New(newtype)))
+    }
+
     fn visit_LField(&mut self, ctx: &LFieldContext<'input>) -> Self::Return {
-        todo!()
+        let id = ctx.ID().unwrap().get_text().into();
+        let lval = self.visit_children(ctx).into_l_val().unwrap();
+        Self::Return::LVal(LVal(
+            ctx.start().into(),
+            LValInner::FieldAccess(Box::new(lval), id),
+        ))
     }
 
     fn visit_LArr(&mut self, ctx: &LArrContext<'input>) -> Self::Return {
-        todo!()
+        let (arr, idx) = extract_2(self.visit_children(ctx));
+        let arr = arr.into_l_val().unwrap();
+        let idx = idx.into_expr().unwrap();
+        Self::Return::LVal(LVal(
+            ctx.start().into(),
+            LValInner::ArrSub(Box::new(arr), idx),
+        ))
+    }
+
+    fn visit_LMetCall(&mut self, ctx: &LMetCallContext<'input>) -> Self::Return {
+        let id = ctx.ID().unwrap().get_text().into();
+        let (object, args) = extract_2(self.visit_children(ctx));
+        let object = object.into_l_val().unwrap();
+        let args = args.into_args().unwrap();
+        Self::Return::LVal(LVal(
+            ctx.start().into(),
+            LValInner::MethodCall {
+                object: Box::new(object),
+                method_name: id,
+                args,
+            },
+        ))
     }
 }

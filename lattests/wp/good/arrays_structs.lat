@@ -7,9 +7,10 @@ class b {
 }
 
 int main() {
-    b b = new b[12];
+    b b = new b;
     b.b[2] = b.b[1];
     b.b[0].a[0] = 0;
+    b.b = new a[2];
 
     return 0;
 }
