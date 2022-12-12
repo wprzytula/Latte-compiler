@@ -588,9 +588,10 @@ impl Stmt {
 
             StmtInner::VarDecl(decl) => {
                 if let NonvoidType::TClass(ref c) | NonvoidType::TClassArr(ref c) = decl.type_ {
-                    env.get_class(c).map_err(|MissingClassDeclarationError(class)| {
-                        TypeCheckError::NonexistingClass(pos, class)
-                    })?;
+                    env.get_class(c)
+                        .map_err(|MissingClassDeclarationError(class)| {
+                            TypeCheckError::NonexistingClass(pos, class)
+                        })?;
                 }
                 for single_decl in decl.decls.iter() {
                     if let Some(ref init_expr) = single_decl.init {
@@ -955,7 +956,7 @@ impl LVal {
                     None,
                     method.ret_type.is_passed_by_ref(),
                 ))
-            },
+            }
             LValInner::New(new_type) => {
                 let (data_type, len) = match new_type {
                     NewType::TInt => (DataType::Nonvoid(NonvoidType::TInt), None),
@@ -1161,15 +1162,27 @@ impl Expr {
                                 (
                                     &DataType::Nonvoid(NonvoidType::TClass(ref class1)),
                                     &DataType::Nonvoid(NonvoidType::TClass(_)),
-                                ) if env.get_class(class1).is_err() => return Err(TypeCheckError::NonexistingClass(pos, class1.clone())),
+                                ) if env.get_class(class1).is_err() => {
+                                    return Err(TypeCheckError::NonexistingClass(
+                                        pos,
+                                        class1.clone(),
+                                    ))
+                                }
                                 (
                                     &DataType::Nonvoid(NonvoidType::TClass(_)),
                                     &DataType::Nonvoid(NonvoidType::TClass(ref class2)),
-                                ) if env.get_class(class2).is_err() => return Err(TypeCheckError::NonexistingClass(pos, class2.clone())),
+                                ) if env.get_class(class2).is_err() => {
+                                    return Err(TypeCheckError::NonexistingClass(
+                                        pos,
+                                        class2.clone(),
+                                    ))
+                                }
                                 (
                                     &DataType::Nonvoid(NonvoidType::TClass(ref class1)),
                                     &DataType::Nonvoid(NonvoidType::TClass(ref class2)),
-                                ) if env.is_subclass(class1, class2) || env.is_subclass(class1, class2) => {
+                                ) if env.is_subclass(class1, class2)
+                                    || env.is_subclass(class1, class2) =>
+                                {
                                     Ok((DataType::Nonvoid(NonvoidType::TBoolean), None))
                                 }
                                 _ => Err(TypeCheckError::EqWrongTypes(
