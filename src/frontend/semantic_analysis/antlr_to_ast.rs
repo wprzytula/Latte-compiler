@@ -55,16 +55,6 @@ fn extract_3(children: AstElem) -> (AstElem, AstElem, AstElem) {
     (fst, snd, trd)
 }
 
-fn extract_4(children: AstElem) -> (AstElem, AstElem, AstElem, AstElem) {
-    let mut iter = children.into_aggregate().unwrap().into_iter();
-    let fst = iter.next().unwrap();
-    let snd = iter.next().unwrap();
-    let trd = iter.next().unwrap();
-    let frt = iter.next().unwrap();
-    iter.next().ok_or(()).unwrap_err();
-    (fst, snd, trd, frt)
-}
-
 fn extract_all(children: AstElem) -> impl Iterator<Item = AstElem> {
     if let AstElem::Aggregate(aggr) = children {
         Either::Left((*aggr).into_iter())

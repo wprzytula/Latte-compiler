@@ -366,10 +366,9 @@ impl Program {
         }
         for class_def in self.1.iter() {
             let ClassDef {
-                pos,
                 class,
-                base_class,
                 class_block,
+                ..
             } = class_def;
             class_block.type_check(class, &mut env.new_scope())?;
         }
@@ -526,6 +525,7 @@ impl FunDef {
         }
         let body_ret_type = self.block.type_check(env, &self.ret_type)?;
         match (&self.ret_type, &body_ret_type) {
+            (_, &Some((DataType::TExit, _))) => Ok(()), //
             (&DataType::TVoid, &None) | (&DataType::TVoid, &Some((DataType::TVoid, _))) => Ok(()), // Void return fulfilled
             (&DataType::Nonvoid(ref expected), &Some((DataType::Nonvoid(ref got), true))) if env.is_subtype(&got.clone().into(), &expected.clone().into()) => Ok(()), // Matching nonvoid return
             (&DataType::Nonvoid(ref expected), &Some((ref got, false))) if env.is_subtype(got, &expected.clone().into()) => Err(TypeCheckError::PossibleNonReturnFromFunction(self.clone())),
@@ -549,16 +549,15 @@ impl Block {
         env: &mut Env,
         allowed_ret_type: &DataType,
     ) -> Result<StmtRetType, TypeCheckError> {
-        // eprintln!("type checking block: {:#?}", self);
         let mut block_ret_type = None;
         for stmt in &self.1 {
             let stmt_ret_type = stmt.type_check(env, allowed_ret_type)?;
             match (stmt_ret_type, &block_ret_type) {
                 (None, _) => (),
                 (stmt_ret_type @ Some(_), None) => block_ret_type = stmt_ret_type,
-                (Some((stmt_ret, stmt_certain)), Some((block_ret, block_certain))) => {
-                    if env.is_subtype(&stmt_ret, block_ret) {
-                        block_ret_type = Some((stmt_ret, *block_certain || stmt_certain));
+                (Some((stmt_ret, stmt_certain)), Some((_, block_certain))) => {
+                    if matches!(stmt_ret, DataType::TExit) | env.is_subtype(&stmt_ret, allowed_ret_type) {
+                        block_ret_type = Some((allowed_ret_type.clone(), *block_certain || stmt_certain));
                     } else {
                         unreachable!(
                             "This is handled by restricting Returns to a certain type only"
@@ -664,7 +663,7 @@ impl Stmt {
 
             StmtInner::Return(ret) => {
                 let (ret_type, _) = ret.type_check(env)?;
-                if env.is_subtype(&ret_type, allowed_ret_type) {
+                if env.is_subtype(&ret_type, allowed_ret_type) || matches!(ret_type, DataType::TExit) {
                     Ok(StmtRetType::Some((ret_type, true)))
                 } else {
                     Err(TypeCheckError::InvalidReturnType(
@@ -733,7 +732,7 @@ impl Stmt {
                             }
                             (Some(then_ret_type), Some(else_ret_type)) => {
                                 match (then_ret_type, else_ret_type) {
-                                    ((typ1, certain1), (typ2, certain2))/*  if typ1 == typ2 */ => {
+                                    ((typ1, certain1), (_typ2, certain2))/*  if typ1 == typ2 */ => {
                                         Ok(Some((typ1, certain1 && certain2)))
                                     }
                                     // (_then_ret_type, _else_ret_type) => {
@@ -759,6 +758,13 @@ impl Stmt {
             }
 
             StmtInner::SExp(e) => {
+                if let Expr(_, ExprInner::LVal(boxed)) = e {
+                    if let LVal(_, LValInner::FunCall { name, args }) = &**boxed {
+                        if name.deref() == "error" && args.is_empty() {
+                            return Ok(Some((DataType::TExit, true)));
+                        }
+                    }
+                }
                 e.type_check(env)?;
                 Ok(None)
             }

@@ -16,13 +16,6 @@ pub struct FunType {
     pub params: Vec<NonvoidType>,
 }
 
-enum Symbol {
-    Var(Ident),
-    Fun(Ident),
-    Class(Ident),
-    Method(Ident, Ident),
-}
-
 #[derive(Debug)]
 pub struct DoubleFuncDeclarationError(pub Ident);
 
@@ -31,20 +24,6 @@ pub struct DoubleVariableDeclarationError(pub Ident);
 pub struct DoubleClassDeclarationError(pub Ident);
 pub struct DoubleFieldDeclarationError(pub Ident, pub Ident, pub NonvoidType);
 pub struct DoubleMethodDeclarationError(pub Ident, pub Ident, pub FunType);
-
-#[derive(Debug, Error)]
-pub enum DoubleDeclarationError {
-    #[error("Function {0} declared twice.")]
-    Fun(Ident),
-    #[error("Variable {0} declared twice.")]
-    Var(Ident),
-    #[error("Class {0} declared twice.")]
-    Class(Ident),
-    #[error("Class {0}: field {1} declared twice.")]
-    Field(Ident, Ident),
-    #[error("Class {0}: method {1} declared twice.")]
-    Method(Ident, Ident),
-}
 
 pub struct MissingFuncDeclarationError(pub Ident);
 
@@ -58,22 +37,6 @@ pub struct MissingBaseClassDeclarationError(pub Ident, pub Ident);
 pub struct MissingFieldError(pub Ident, pub Ident);
 
 pub struct MissingMethodError(pub Ident, pub Ident);
-
-// #[derive(Debug, Error)]
-pub enum MissingDeclarationError {
-    // #[error("Function {0} referred but never declared.")]
-    Fun(Ident),
-    // #[error("Variable {0} referred but never declared.")]
-    Var(Ident),
-    // #[error("Class {0} referred but never declared.")]
-    Class(Ident),
-    // #[error("Class {0} referred as base for class {1} but never declared.")]
-    BaseClass(Ident, Ident), // (missing, for subclass)
-    // #[error("Field {1} on class {0} referred but never declared.")]
-    Field(Ident, Ident), // (class, field)
-    // #[error("Method {1} on class {0} referred but never declared.")]
-    Method(Ident, Ident), // (class, method)
-}
 
 #[derive(Debug, Error)]
 #[error("Found circular inheritance: {}", CircularDependencyDisplay(&.0))]
@@ -224,6 +187,8 @@ impl Env {
 
     pub fn is_subtype<'a: 'b, 'b>(&'a self, data_type: &'b DataType, base_type: &DataType) -> bool {
         match (data_type, base_type) {
+            (_, DataType::TExit) => unreachable!(),
+            (DataType::TExit, _) => unreachable!(),
             (DataType::TVoid, DataType::TVoid) => true,
             (DataType::TVoid, DataType::Nonvoid(_)) | (DataType::Nonvoid(_), DataType::TVoid) => {
                 false

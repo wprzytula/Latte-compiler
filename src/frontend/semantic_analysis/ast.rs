@@ -216,12 +216,14 @@ impl NonvoidType {
 #[derive(Clone, Debug)]
 pub enum DataType {
     TVoid,
+    TExit,
     Nonvoid(NonvoidType),
 }
 impl Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DataType::TVoid => f.write_str("void"),
+            DataType::TExit => f.write_str("!"),
             DataType::Nonvoid(n) => n.fmt(f),
         }
     }
@@ -229,13 +231,13 @@ impl Display for DataType {
 impl DataType {
     pub fn is_passed_by_ref(&self) -> bool {
         match self {
-            DataType::TVoid => false,
+            DataType::TVoid | DataType::TExit => false,
             DataType::Nonvoid(n) => n.is_passed_by_ref(),
         }
     }
     pub fn array_member_type(&self) -> Option<NonvoidType> {
         match self {
-            DataType::TVoid => None,
+            DataType::TVoid | DataType::TExit => None,
             DataType::Nonvoid(n) => n.array_member_type(),
         }
     }
