@@ -2,3 +2,4 @@
 // pub mod compiler;
 
 // pub use interpreter::interpret;
+pub mod ir;

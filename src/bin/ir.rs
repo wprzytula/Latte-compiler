@@ -52,7 +52,7 @@ fn main() -> Result<(), Error> {
             }
         }
         let ir = ast.unwrap().ir();
-        println!("{:?}", ir);
+        println!("{:#?}", ir);
     }
 
     Ok(())

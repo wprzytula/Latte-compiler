@@ -366,9 +366,7 @@ impl Program {
         }
         for class_def in self.1.iter() {
             let ClassDef {
-                class,
-                class_block,
-                ..
+                class, class_block, ..
             } = class_def;
             class_block.type_check(class, &mut env.new_scope())?;
         }
@@ -556,8 +554,11 @@ impl Block {
                 (None, _) => (),
                 (stmt_ret_type @ Some(_), None) => block_ret_type = stmt_ret_type,
                 (Some((stmt_ret, stmt_certain)), Some((_, block_certain))) => {
-                    if matches!(stmt_ret, DataType::TExit) | env.is_subtype(&stmt_ret, allowed_ret_type) {
-                        block_ret_type = Some((allowed_ret_type.clone(), *block_certain || stmt_certain));
+                    if matches!(stmt_ret, DataType::TExit)
+                        | env.is_subtype(&stmt_ret, allowed_ret_type)
+                    {
+                        block_ret_type =
+                            Some((allowed_ret_type.clone(), *block_certain || stmt_certain));
                     } else {
                         unreachable!(
                             "This is handled by restricting Returns to a certain type only"
@@ -663,7 +664,9 @@ impl Stmt {
 
             StmtInner::Return(ret) => {
                 let (ret_type, _) = ret.type_check(env)?;
-                if env.is_subtype(&ret_type, allowed_ret_type) || matches!(ret_type, DataType::TExit) {
+                if env.is_subtype(&ret_type, allowed_ret_type)
+                    || matches!(ret_type, DataType::TExit)
+                {
                     Ok(StmtRetType::Some((ret_type, true)))
                 } else {
                     Err(TypeCheckError::InvalidReturnType(
@@ -1311,7 +1314,7 @@ impl Expr {
                 Ok((data_type, constval))
             }
         }?;
-        
+
         *self.2.borrow_mut() = Some(typ.0.clone());
         Ok(typ)
     }

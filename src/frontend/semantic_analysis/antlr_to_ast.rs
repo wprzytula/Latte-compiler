@@ -1,6 +1,6 @@
-use std::{num::ParseIntError, cell::RefCell};
 #[allow(non_snake_case)]
 use std::rc::Rc;
+use std::{cell::RefCell, num::ParseIntError};
 
 use antlr_rust::{
     parser_rule_context::ParserRuleContext,
@@ -362,7 +362,11 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     fn visit_LFunCall(&mut self, ctx: &LFunCallContext<'input>) -> Self::Return {
         let name = ctx.ID().unwrap().get_text().into();
         let args = self.visit_children(ctx).into_args().unwrap();
-        Self::Return::LVal(LVal(ctx.start().into(), LValInner::FunCall { name, args }, RefCell::new(None)))
+        Self::Return::LVal(LVal(
+            ctx.start().into(),
+            LValInner::FunCall { name, args },
+            RefCell::new(None),
+        ))
     }
 
     fn visit_LParen(&mut self, ctx: &LParenContext<'input>) -> Self::Return {
@@ -418,7 +422,11 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     /* Expr */
     fn visit_ELVal(&mut self, ctx: &ELValContext<'input>) -> Self::Return {
         let e_lval = self.visit_children(ctx).into_l_val().unwrap();
-        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::LVal(Box::new(e_lval)), RefCell::new(None)))
+        Self::Return::Expr(Expr(
+            ctx.start().into(),
+            ExprInner::LVal(Box::new(e_lval)),
+            RefCell::new(None),
+        ))
     }
 
     fn visit_args(&mut self, ctx: &ArgsContext<'input>) -> Self::Return {
@@ -442,21 +450,37 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     }
 
     fn visit_ETrue(&mut self, ctx: &ETrueContext<'input>) -> Self::Return {
-        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::BoolLit(true), RefCell::new(None)))
+        Self::Return::Expr(Expr(
+            ctx.start().into(),
+            ExprInner::BoolLit(true),
+            RefCell::new(None),
+        ))
     }
 
     fn visit_EFalse(&mut self, ctx: &EFalseContext<'input>) -> Self::Return {
-        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::BoolLit(false), RefCell::new(None)))
+        Self::Return::Expr(Expr(
+            ctx.start().into(),
+            ExprInner::BoolLit(false),
+            RefCell::new(None),
+        ))
     }
 
     fn visit_EInt(&mut self, ctx: &EIntContext<'input>) -> Self::Return {
         assert!(self.visit_children(ctx).is_default());
         let int = ctx.get_text().parse::<Int>();
         match int {
-            Ok(int) => Self::Return::Expr(Expr(ctx.start().into(), ExprInner::IntLit(int), RefCell::new(None))), // just to satisfy the type checker
+            Ok(int) => Self::Return::Expr(Expr(
+                ctx.start().into(),
+                ExprInner::IntLit(int),
+                RefCell::new(None),
+            )), // just to satisfy the type checker
             Err(err) => {
                 self.error = Some(ConversionError::ParseInt(err));
-                Self::Return::Expr(Expr(ctx.start().into(), ExprInner::IntLit(0), RefCell::new(None)))
+                Self::Return::Expr(Expr(
+                    ctx.start().into(),
+                    ExprInner::IntLit(0),
+                    RefCell::new(None),
+                ))
                 // just to satisfy the type checker
             }
         }
@@ -490,7 +514,7 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Expr(Expr(
             ctx.start().into(),
             ExprInner::Op(Op::UnOp(un_op_type, Box::new(expr))),
-            RefCell::new(None)
+            RefCell::new(None),
         ))
     }
 
@@ -686,7 +710,11 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     /* Expr */
     fn visit_ENull(&mut self, ctx: &ENullContext<'input>) -> Self::Return {
         let nonvoid = self.visit_children(ctx).into_nonvoid().unwrap();
-        Self::Return::Expr(Expr(ctx.start().into(), ExprInner::Null(nonvoid), RefCell::new(None)))
+        Self::Return::Expr(Expr(
+            ctx.start().into(),
+            ExprInner::Null(nonvoid),
+            RefCell::new(None),
+        ))
     }
 
     /* Stmt */
@@ -706,7 +734,11 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
     /* LVal */
     fn visit_LNew(&mut self, ctx: &LNewContext<'input>) -> Self::Return {
         let newtype = self.visit_children(ctx).into_new_type().unwrap();
-        Self::Return::LVal(LVal(ctx.start().into(), LValInner::New(newtype), RefCell::new(None)))
+        Self::Return::LVal(LVal(
+            ctx.start().into(),
+            LValInner::New(newtype),
+            RefCell::new(None),
+        ))
     }
 
     fn visit_LField(&mut self, ctx: &LFieldContext<'input>) -> Self::Return {
