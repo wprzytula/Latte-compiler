@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use latte::frontend::{
     parser::{build_parser, latteparser::ProgramContextAll},
-    semantic_analysis::Program,
+    semantic_analysis::ast::Program,
 };
 
 #[derive(Debug)]

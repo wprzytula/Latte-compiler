@@ -39,7 +39,7 @@ fn main() -> Result<(), Error> {
     } else {
         let ast = Program::try_from(antlr_ast);
         match ast {
-            Ok(ast) => match ast.type_check() {
+            Ok(ref ast) => match ast.type_check() {
                 Ok(()) => eprintln!("OK"),
                 Err(e) => {
                     eprintln!("ERROR");
@@ -51,6 +51,8 @@ fn main() -> Result<(), Error> {
                 return Err(Error::Conversion(err));
             }
         }
+        let ir = ast.unwrap().ir();
+        println!("{:?}", ir);
     }
 
     Ok(())
