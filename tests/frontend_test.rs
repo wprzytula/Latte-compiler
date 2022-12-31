@@ -31,7 +31,7 @@ fn lattests_parse() {
 
     let bad_paths = [
         "lattests/bad/parse",
-        "wp/bad/parse",
+        // "wp/bad/parse",
         "mrjp-tests/bad/parse",
         "margdoc/bad/parse",
     ];

@@ -758,9 +758,10 @@ impl Stmt {
             }
 
             StmtInner::SExp(e) => {
-                if let Expr(_, ExprInner::LVal(boxed)) = e {
-                    if let LVal(_, LValInner::FunCall { name, args }) = &**boxed {
+                if let Expr(_, ExprInner::LVal(boxed), _) = e {
+                    if let LVal(_, LValInner::FunCall { name, args }, typ) = &**boxed {
                         if name.deref() == "error" && args.is_empty() {
+                            *typ.borrow_mut() = Some(DataType::TExit);
                             return Ok(Some((DataType::TExit, true)));
                         }
                     }
@@ -807,7 +808,7 @@ impl LVal {
     ) -> Result<(DataType, Option<Constexpr>, bool), TypeCheckError> {
         // (type, constval, is_lval)
         let pos = self.0;
-        match &self.1 {
+        let res_typ: Result<(DataType, Option<Constexpr>, bool), TypeCheckError> = match &self.1 {
             LValInner::Id(id) => {
                 let nonvoid = env
                     .get_variable_type(id)
@@ -1006,7 +1007,11 @@ impl LVal {
                 }
                 Ok((data_type, None, false))
             }
-        }
+        };
+        let typ = res_typ?;
+
+        *self.2.borrow_mut() = Some(typ.0.clone());
+        Ok(typ)
     }
 }
 
@@ -1015,7 +1020,7 @@ impl Expr {
         // (type, consteval)
         // eprintln!("type checking expr: {:#?}", self);
         let pos = self.0;
-        match &self.1 {
+        let typ = match &self.1 {
             ExprInner::IntLit(i) => Ok((
                 DataType::Nonvoid(NonvoidType::TInt),
                 Some(Constexpr::Int(*i)),
@@ -1305,7 +1310,10 @@ impl Expr {
                 let (data_type, constval, _) = lval.type_check(env)?;
                 Ok((data_type, constval))
             }
-        }
+        }?;
+        
+        *self.2.borrow_mut() = Some(typ.0.clone());
+        Ok(typ)
     }
 }
 

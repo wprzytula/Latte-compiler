@@ -2,7 +2,7 @@ use antlr_rust::token::GenericToken;
 use smallvec::SmallVec;
 use std::{
     borrow::Cow,
-    cell::Ref,
+    cell::{Ref, RefCell},
     fmt::{self, Display, Write},
     hash::{self, Hash},
     ops::Deref,
@@ -135,7 +135,7 @@ pub enum StmtInner {
 }
 
 #[derive(Debug, Clone)]
-pub struct LVal(pub Pos, pub LValInner);
+pub struct LVal(pub Pos, pub LValInner, pub RefCell<Option<DataType>>);
 impl Deref for LVal {
     type Target = LValInner;
 
@@ -359,7 +359,7 @@ pub enum LogOpType {
 }
 
 #[derive(Debug, Clone)]
-pub struct Expr(pub Pos, pub ExprInner);
+pub struct Expr(pub Pos, pub ExprInner, pub RefCell<Option<DataType>>);
 impl Deref for Expr {
     type Target = ExprInner;
 
