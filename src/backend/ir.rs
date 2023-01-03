@@ -76,6 +76,10 @@ pub enum RelOpType {
     NEq,
 }
 
+fn mangle_method(name: &Ident, class: &Ident) -> Ident {
+    Ident::from(format!("{}${}", name, class))
+}
+
 fn rename_var(var: &mut Var, prev: Var, current: Var) {
     if *var == prev {
         *var = current;
@@ -96,15 +100,12 @@ pub enum Quadruple {
     Copy(Var, Var),
     Set(Var, Instant),
 
-    // Label(Label),
-    // Goto(Label),
-    // GotoIf(Label, Reg, RelOpType, Reg),
+    Call(Var, Ident, Vec<Value>),
+
     ArrLoad(Var, Var, Value),  // (dst, arr, idx)
     ArrStore(Var, Value, Var), // (arr, idx, src)
     DerefLoad(Var, Var),       // (dst, ptr)
     DerefStore(Value, Var),    // (src, ptr)
-    // Return(Option<Value>),
-    Call(Var, Ident, Vec<Value>),
 }
 
 impl Quadruple {
@@ -117,15 +118,15 @@ impl Quadruple {
             Quadruple::UnOp(_, _, val) => rename_val(val, prev, current),
             Quadruple::Copy(_, var) => rename_var(var, prev, current),
             Quadruple::Set(_, _) => (),
-            Quadruple::ArrLoad(_, _, _) => todo!(),
-            Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _) => todo!(),
-            Quadruple::DerefStore(_, _) => todo!(),
             Quadruple::Call(_, _, vals) => {
                 for val in vals {
                     rename_val(val, prev, current);
                 }
             }
+            Quadruple::ArrLoad(_, _, _) => todo!(),
+            Quadruple::ArrStore(_, _, _) => todo!(),
+            Quadruple::DerefLoad(_, _) => todo!(),
+            Quadruple::DerefStore(_, _) => todo!(),
         }
     }
 
@@ -169,7 +170,7 @@ pub struct BasicBlockIdx(usize);
 pub struct CFG {
     pub blocks: Vec<BasicBlock>,
     current_block_idx: BasicBlockIdx,
-    pub function_entries: HashMap<(Ident, Option<Ident>), (BasicBlockIdx, FunType)>,
+    pub function_entries: HashMap<Ident, (BasicBlockIdx, FunType)>,
 }
 
 impl CFG {
@@ -181,10 +182,10 @@ impl CFG {
         }
     }
 
-    fn new_function(&mut self, id: Ident, class: Option<Ident>, fun_type: FunType) {
+    fn new_function(&mut self, id: Ident, fun_type: FunType) {
         let entry = self.new_block();
         self.function_entries
-            .insert((id, class), (entry, fun_type))
+            .insert(id, (entry, fun_type))
             .ok_or(())
             .unwrap_err(); // assert unique name
         self.make_current(entry);
@@ -205,7 +206,7 @@ impl CFG {
         self.current_block_idx = idx;
     }
 
-    pub fn variables_in_function(&self, func_name: &(Ident, Option<Ident>)) -> HashSet<Var> {
+    pub fn variables_in_function(&self, func_name: &Ident) -> HashSet<Var> {
         let (entry, _) = *self.function_entries.get(func_name).unwrap();
         let mut variables = HashSet::new();
 
@@ -640,7 +641,7 @@ impl Program {
                     .iter()
                     .map(|param| (param.name.clone(), param.type_.clone())),
             );
-            cfg.new_function(func.name.clone(), None, func.fun_type());
+            cfg.new_function(func.name.clone(), func.fun_type());
             func.block.ir(&mut cfg, &mut state);
         }
 
