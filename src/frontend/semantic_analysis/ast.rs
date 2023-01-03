@@ -9,8 +9,6 @@ use std::{
     rc::Rc,
 };
 
-use crate::backend::ir::Quadruple;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pos {
     pub line: isize,

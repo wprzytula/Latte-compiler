@@ -479,7 +479,7 @@ impl ClassBlock {
 }
 
 impl FunDef {
-    fn fun_type(&self) -> FunType {
+    pub fn fun_type(&self) -> FunType {
         FunType {
             ret_type: self.ret_type.clone(),
             params: self.params.iter().map(|arg| arg.type_.clone()).collect(),

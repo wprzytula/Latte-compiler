@@ -5,7 +5,10 @@ use std::{
 
 use vector_map::VecMap;
 
-use crate::frontend::semantic_analysis::ast::{self, *};
+use crate::frontend::semantic_analysis::{
+    ast::{self, *},
+    FunType,
+};
 
 use self::state::State;
 
@@ -19,7 +22,7 @@ pub enum Value {
 pub struct Var(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Instant(i64);
+pub struct Instant(pub i64);
 impl Instant {
     fn bool(b: bool) -> Self {
         Self(i64::from(b))
@@ -159,14 +162,14 @@ impl Quadruple {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct BasicBlockIdx(usize);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BasicBlockIdx(usize);
 
 #[derive(Debug)]
 pub struct CFG {
-    blocks: Vec<BasicBlock>,
+    pub blocks: Vec<BasicBlock>,
     current_block_idx: BasicBlockIdx,
-    function_entries: HashMap<(Ident, Option<Ident>), BasicBlockIdx>,
+    pub function_entries: HashMap<(Ident, Option<Ident>), (BasicBlockIdx, FunType)>,
 }
 
 impl CFG {
@@ -178,10 +181,10 @@ impl CFG {
         }
     }
 
-    fn new_function(&mut self, id: Ident, class: Option<Ident>) {
+    fn new_function(&mut self, id: Ident, class: Option<Ident>, fun_type: FunType) {
         let entry = self.new_block();
         self.function_entries
-            .insert((id, class), entry)
+            .insert((id, class), (entry, fun_type))
             .ok_or(())
             .unwrap_err(); // assert unique name
         self.make_current(entry);
@@ -202,8 +205,29 @@ impl CFG {
         self.current_block_idx = idx;
     }
 
+    pub fn variables_in_function(&self, func_name: &(Ident, Option<Ident>)) -> HashSet<Var> {
+        let (entry, _) = *self.function_entries.get(func_name).unwrap();
+        let mut variables = HashSet::new();
+
+        fn dfs_variables(cfg: &CFG, block_idx: BasicBlockIdx, variables: &mut HashSet<Var>) {
+            cfg[block_idx].defined_variables(variables);
+            for succ in cfg[block_idx].successors.iter().copied() {
+                dfs_variables(cfg, succ, variables)
+            }
+        }
+
+        dfs_variables(self, entry, &mut variables);
+
+        variables
+    }
+
     fn link_succ_and_pred(&mut self) {
-        let entries = self.function_entries.values().copied().collect::<Vec<_>>();
+        let entries = self
+            .function_entries
+            .values()
+            .map(|(entry, _)| entry)
+            .copied()
+            .collect::<Vec<_>>();
         let mut visited = vec![];
         for entry in entries {
             visited.clear();
@@ -238,7 +262,7 @@ impl CFG {
 
         for (idx, block) in self.blocks.iter_mut().enumerate() {
             let this = BasicBlockIdx(idx);
-            let vars = block.variables();
+            let vars = block.all_variables();
 
             if block.predecessors.len() > 1 {
                 // insert (possibly reduntant) phi nodes
@@ -368,7 +392,7 @@ impl CFG {
                         assert_eq!(from, replacement_var);
                         false
                     }
-                    _ => true
+                    _ => true,
                 });
                 if let Some(ref mut end_info) = block.end_type {
                     end_info.rename_usages(redundant_var, replacement_var);
@@ -392,7 +416,7 @@ impl IndexMut<BasicBlockIdx> for CFG {
 }
 
 #[derive(Debug)]
-enum EndType {
+pub enum EndType {
     Goto(BasicBlockIdx),
     IfElse(Var, BasicBlockIdx, BasicBlockIdx),
     Return(Option<Value>),
@@ -411,11 +435,11 @@ impl EndType {
 
 #[derive(Debug)]
 pub struct BasicBlock {
-    quadruples: Vec<Quadruple>,
-    successors: Vec<BasicBlockIdx>,
-    predecessors: Vec<BasicBlockIdx>,
+    pub quadruples: Vec<Quadruple>,
+    pub successors: Vec<BasicBlockIdx>,
+    pub predecessors: Vec<BasicBlockIdx>,
     entry: bool,
-    end_type: Option<EndType>,
+    pub end_type: Option<EndType>,
     phi_nodes: VecMap<Var, VecMap<BasicBlockIdx, Var>>,
 }
 
@@ -439,7 +463,29 @@ impl BasicBlock {
         self.quadruples.is_empty()
     }
 
-    fn variables(&self) -> HashSet<Var> {
+    fn defined_variables(&self, buf: &mut HashSet<Var>) {
+        assert!(self.phi_nodes.is_empty());
+        for var in self
+            .quadruples
+            .iter()
+            .filter_map(|quadruple| match quadruple {
+                Quadruple::BinOp(var, _, _, _)
+                | Quadruple::RelOp(var, _, _, _)
+                | Quadruple::UnOp(var, _, _)
+                | Quadruple::Copy(var, _)
+                | Quadruple::Set(var, _)
+                | Quadruple::Call(var, _, _) => Some(*var),
+                Quadruple::ArrLoad(_, _, _) => todo!(),
+                Quadruple::ArrStore(_, _, _) => todo!(),
+                Quadruple::DerefLoad(_, _) => todo!(),
+                Quadruple::DerefStore(_, _) => todo!(),
+            })
+        {
+            buf.insert(var);
+        }
+    }
+
+    fn all_variables(&self) -> HashSet<Var> {
         let mut vars = HashSet::<Var>::new();
         for quadruple in self.quadruples.iter() {
             match quadruple {
@@ -594,7 +640,7 @@ impl Program {
                     .iter()
                     .map(|param| (param.name.clone(), param.type_.clone())),
             );
-            cfg.new_function(func.name.clone(), None);
+            cfg.new_function(func.name.clone(), None, func.fun_type());
             func.block.ir(&mut cfg, &mut state);
         }
 
