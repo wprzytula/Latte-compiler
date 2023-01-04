@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::io;
 use std::{fmt::Display, rc::Rc};
 
 use latte::frontend::{
@@ -17,6 +18,9 @@ enum Error {
 
     #[error("Type check: {0}")]
     TypeCheck(TypeCheckError),
+
+    #[error("IO error: {0}")]
+    IO(#[from] io::Error)
 }
 
 impl Debug for Error {
@@ -52,7 +56,9 @@ fn main() -> Result<(), Error> {
             }
         }
         let cfg = ast.unwrap().ir();
-        println!("{:#?}", &cfg);
+
+        let mut stdout = io::stdout();
+        cfg.emit_assembly(&mut stdout)?;
     }
 
     Ok(())

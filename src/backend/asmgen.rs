@@ -9,11 +9,13 @@ use vector_map::VecMap;
 use crate::frontend::semantic_analysis::ast::Ident;
 
 use super::ir::{
-    self, BasicBlock, BasicBlockIdx, BinOpType, EndType, Instant, Quadruple, RelOpType, UnOpType,
-    CFG,
+    self, BasicBlock, BasicBlockIdx, BinOpType, CfgFunction, EndType, Instant, Quadruple,
+    RelOpType, UnOpType, CFG,
 };
 
 const ARGS_IN_REGISTERS: usize = 6;
+const QUADWORD_SIZE: usize = 8; // in bytes
+const RETADDR_SIZE: usize = QUADWORD_SIZE;
 
 type AsmGenResult = io::Result<()>;
 
@@ -89,7 +91,7 @@ impl Display for Mem {
         if let Some(displacement) = self.displacement {
             let abs = displacement.abs() as usize;
             let sg = if displacement < 0 { '-' } else { '+' };
-            write!(f, "{} {}", sg, abs)?;
+            write!(f, " {} {}", sg, abs)?;
         }
         write!(f, "]")
     }
@@ -179,7 +181,7 @@ impl Display for CalleeSaveReg {
 
 /// Contains variable's offset relative to frame, in bytes
 #[derive(Clone, Copy)]
-pub struct Var(usize);
+pub struct Var(isize);
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Label {
@@ -200,22 +202,22 @@ impl Label {
     }
 }
 
-struct State<'a> {
-    vars: HashMap<&'a str, Var>,
+struct State /* <'a> */ {
+    // vars: HashMap<&'a str, Var>,
+    // next_var_idx: usize,
     block_labels: HashMap<BasicBlockIdx, Label>,
-    next_var_idx: usize,
     next_label_idx: usize,
-    rsp_offset: usize, // relative to rbp
+    rsp_displacement: isize, // where is ret addr relatively to current RSP
 }
 
-impl<'a> State<'a> {
+impl State /* <'a> */ {
     fn new() -> Self {
         Self {
-            vars: HashMap::new(),
+            // vars: HashMap::new(),
+            // next_var_idx: 0,
             block_labels: HashMap::new(),
-            next_var_idx: 0,
             next_label_idx: 0,
-            rsp_offset: 0,
+            rsp_displacement: 0,
         }
     }
 
@@ -227,7 +229,7 @@ impl<'a> State<'a> {
         })
     }
 
-    fn declare_variable(&mut self, var: &'a str) {
+    /* fn declare_variable(&mut self, var: &'a str) {
         if !self.vars.contains_key(var) {
             self.vars.insert(var, Var(self.next_var_idx));
             self.next_var_idx += 1;
@@ -236,7 +238,7 @@ impl<'a> State<'a> {
 
     fn get_var_idx(&self, var: &'a str) -> Var {
         *self.vars.get(var).unwrap()
-    }
+    } */
 
     fn gen_label(&mut self) -> Label {
         let label = Label::Num(self.next_label_idx);
@@ -244,13 +246,19 @@ impl<'a> State<'a> {
         label
     }
 
-    fn restore_rsp(&mut self) -> Instr {
-        let rsp_offset = self.rsp_offset;
-        self.rsp_offset = 0;
-        Instr::Add(RSP, Val::Instant(Instant(rsp_offset as i64)))
+    fn advance_rsp(&mut self, displacement: isize) -> Instr {
+        self.rsp_displacement = displacement;
+        Instr::Sub(RSP, Val::Instant(Instant(displacement as i64)))
+    }
+
+    fn reset_rsp(&mut self) -> Instr {
+        let rsp_displacement = self.rsp_displacement;
+        self.rsp_displacement = 0;
+        Instr::Add(RSP, Val::Instant(Instant(rsp_displacement as i64)))
     }
 }
 
+#[must_use]
 enum Instr {
     Jmp(Label),
     Jz(Label),
@@ -259,6 +267,13 @@ enum Instr {
     Jge(Label),
     Jl(Label),
     Jle(Label),
+
+    Sete,
+    Setne,
+    Setlt,
+    Setle,
+    Setgt,
+    Setge,
 
     MovToReg(Reg, Val),
     MovToMem(Mem, Reg),
@@ -303,6 +318,13 @@ impl Instr {
             Instr::Jl(label) => writeln!(out, "jl {}", label),
             Instr::Jle(label) => writeln!(out, "jle {}", label),
 
+            Instr::Sete => writeln!(out, "sete cl"),
+            Instr::Setne => writeln!(out, "setne cl"),
+            Instr::Setlt => writeln!(out, "setlt cl"),
+            Instr::Setle => writeln!(out, "setle cl"),
+            Instr::Setgt => writeln!(out, "setgt cl"),
+            Instr::Setge => writeln!(out, "setge cl"),
+
             Instr::MovToReg(reg, val) => writeln!(out, "mov {}, {}", reg, val),
             Instr::MovToMem(mem, reg) => writeln!(out, "mov {}, {}", mem, reg),
 
@@ -341,86 +363,103 @@ impl Instr {
  * base_var1 | ... | base_varn | base_retcode [base_frame end] | [child_frame begin] var1 | var2 | ... | varn | retcode [child_frame_end]
  * upon call, the caller makes place for all callee's variables and calls (pushes retcode and jumps to the callee's label).
  * after call, the caller must clean up the callee's variables.
+ *
+ * frame_size: in bytes, including variables and return address (Constant, stored in Frame)
+ * rsp_displacement: in bytes, signifies current rsp movement relative to current function's return address (Mutable, stored in State)
  */
 
 struct Frame {
-    stack_parameters_count: usize,
+    // stack_parameters_count: usize,
     local_variables_count: usize,
     variables_mapping: VecMap<ir::Var, Var>, // var -> offset wrt RBP (frame)
+    frame_size: usize,                       // in bytes
 }
 
 impl Frame {
-    fn new(stack_parameters_count: usize, variables: HashSet<ir::Var>) -> Self {
-        let mut f = Self {
-            stack_parameters_count,
-            local_variables_count: 0,
-            variables_mapping: VecMap::new(),
-        };
-        for var in variables {
-            f.variables_mapping
-                .insert(var, Var(f.local_variables_count * 8));
-            f.local_variables_count += 1;
+    fn new(_stack_parameters_count: usize, variables: HashSet<ir::Var>) -> Self {
+        eprintln!("Creating frame with variables: {:#?}", variables);
+        let variables_mapping = variables
+            .into_iter()
+            .enumerate()
+            .map(|(k, var)| (var, Var(k as isize * 8)))
+            .collect::<VecMap<_, _>>();
+        Self {
+            local_variables_count: variables_mapping.len(),
+            frame_size: (variables_mapping.len() + 1) * QUADWORD_SIZE,
+            variables_mapping,
         }
-        f
     }
 
-    fn get_variable_offset_relative_to_frame(&self, variable: ir::Var) -> Var {
-        *self.variables_mapping.get(&variable).unwrap()
+    fn get_variable_offset_relative_to_frame(&self, variable: ir::Var) -> isize {
+        self.variables_mapping.get(&variable).unwrap_or_else(|| panic!("{:?} not registered in frame.", variable)).0
     }
 
-    fn get_variable_offset_relative_to_rsp(&self, variable: ir::Var, rsp_offset: usize) -> usize {
-        rsp_offset - self.get_variable_offset_relative_to_frame(variable).0 + /* return address */ 8
+    fn get_variable_offset_relative_to_retaddr(&self, variable: ir::Var) -> isize {
+        self.frame_size as isize + self.get_variable_offset_relative_to_frame(variable) + /* return address */ QUADWORD_SIZE as isize
     }
 
-    fn get_variable_mem(&self, variable: ir::Var, rsp_offset: usize) -> Mem {
+    fn get_variable_offset_relative_to_rsp(
+        &self,
+        variable: ir::Var,
+        rsp_displacement: isize,
+    ) -> isize {
+        self.get_variable_offset_relative_to_retaddr(variable) + rsp_displacement
+    }
+
+    fn get_variable_mem(&self, variable: ir::Var, rsp_displacement: isize) -> Mem {
         Mem {
             word_len: WordLen::Qword,
             base: RSP,
             index: None,
             displacement: Some(
-                self.get_variable_offset_relative_to_rsp(variable, rsp_offset) as isize,
+                self.get_variable_offset_relative_to_rsp(variable, rsp_displacement),
             ),
         }
     }
 
-    fn get_val(&self, val: ir::Value, rsp_offset: usize) -> Val {
+    fn get_val(&self, val: ir::Value, rsp_displacement: isize) -> Val {
         match val {
             ir::Value::Instant(i) => Val::Instant(i),
-            ir::Value::Variable(var) => Val::Mem(self.get_variable_mem(var, rsp_offset)),
+            ir::Value::Variable(var) => Val::Mem(self.get_variable_mem(var, rsp_displacement)),
         }
     }
 }
 
 impl CFG {
     pub fn emit_assembly(&self, out: &mut impl Write) -> AsmGenResult {
+        eprintln!("Building frames");
         let frames = self
-            .function_entries
+            .functions
             .iter()
-            .map(|(func, (_, fun_type))| {
-                let variables = self.variables_in_function(func);
+            .map(|(func, CfgFunction { params, .. })| {
+                let mut variables = self.variables_in_function(func);
+                variables.extend(params);
                 (
                     func.clone(),
                     Frame::new(
-                        isize::max(
-                            fun_type.params.len() as isize - ARGS_IN_REGISTERS as isize,
-                            0,
-                        ) as usize,
+                        isize::max(params.len() as isize - ARGS_IN_REGISTERS as isize, 0) as usize,
                         variables,
                     ),
                 )
             })
             .collect::<HashMap<_, _>>();
 
+        eprintln!("Built frames");
         let mut state = State::new();
+        let mut emitted = HashSet::new();
 
-        for (func, (entry, fun_type)) in self.function_entries.iter() {
+        for (func, CfgFunction { entry, .. }) in self.functions.iter() {
+            assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
             let func_label = Label::Func(func.clone());
 
+            eprintln!("\nEmitting function: {}", func);
+            writeln!(out, "")?;
             func_label.emit(out)?;
 
-            self.emit_function(
+            self.emit_function_block(
                 out,
                 *entry,
+                &mut emitted,
                 &frames,
                 frames.get(func).unwrap(),
                 &mut state,
@@ -431,20 +470,30 @@ impl CFG {
         Ok(())
     }
 
-    fn emit_function(
+    fn emit_function_block(
         &self,
         out: &mut impl Write,
         func_block: BasicBlockIdx,
+        emitted: &mut HashSet<BasicBlockIdx>,
         frames: &HashMap<Ident, Frame>,
         frame: &Frame,
         state: &mut State,
         next_l: Option<&Label>,
     ) -> AsmGenResult {
-        self[func_block].emit(out, frames, frame, state)?;
+        if emitted.contains(&func_block) {
+            eprintln!("Block: {:?} has already been emitted; returning.", func_block);
+            return Ok(())
+        } else {
+            emitted.insert(func_block);
+        }
+
+        eprintln!("Emitting block: {:?}", func_block);
+        state.get_block_label(func_block).emit(out)?;
+        self[func_block].emit(self, out, frames, frame, state)?;
 
         match &self[func_block].end_type {
             Some(EndType::Return(None)) | None => {
-                state.restore_rsp().emit(out)?;
+                // state.reset_rsp().emit(out)?;
                 Instr::Ret.emit(out)?;
             }
             Some(EndType::Return(Some(val))) => {
@@ -452,38 +501,55 @@ impl CFG {
                     ir::Value::Instant(i) => Instr::MovToReg(RAX, Val::Instant(*i)).emit(out)?,
                     ir::Value::Variable(var) => Instr::MovToReg(
                         RAX,
-                        Val::Mem(frame.get_variable_mem(*var, state.rsp_offset)),
+                        Val::Mem(frame.get_variable_mem(*var, state.rsp_displacement)),
                     )
                     .emit(out)?,
                 }
-                state.restore_rsp().emit(out)?;
+                // state.reset_rsp().emit(out)?;
                 Instr::Ret.emit(out)?;
             }
             Some(EndType::Goto(block_idx)) => {
-                if next_l
-                    .map(|next_l| state.get_block_label(*block_idx) != *next_l)
-                    .unwrap_or(true)
-                {
+                // If not emitted yet, simply emit it below and save a jump
+                if emitted.contains(block_idx) && next_l != Some(&state.get_block_label(*block_idx)) {
                     Instr::Jmp(state.get_block_label(*block_idx).clone()).emit(out)?;
                 }
+                self.emit_function_block(out, *block_idx, emitted, frames, frame, state, next_l)?;
             }
             Some(EndType::IfElse(ir_var, then_block, else_block)) => {
-                let _then_l = state.get_block_label(*then_block).clone();
+                let then_l = state.get_block_label(*then_block).clone();
                 let else_l = state.get_block_label(*else_block).clone();
 
                 // Cond
                 Instr::MovToReg(
                     RAX,
-                    Val::Mem(frame.get_variable_mem(*ir_var, state.rsp_offset)),
+                    Val::Mem(frame.get_variable_mem(*ir_var, state.rsp_displacement)),
                 )
                 .emit(out)?;
                 Instr::Test(RAX).emit(out)?;
+                if next_l == Some(&then_l) {
+                    Instr::Jnz(else_l.clone()).emit(out)?;
+                    // self.emit_function_block(out, *then_block, emitted, frames, frame, state, Some(&else_l))?;
 
-                // Then
-                self.emit_function(out, *then_block, frames, frame, state, Some(&else_l))?;
+                    // Else
+                    self.emit_function_block(out, *else_block, emitted, frames, frame, state, next_l)?;
+                } else if next_l == Some(&else_l) {
+                    Instr::Jz(then_l.clone()).emit(out)?;
+                    // Else already emitted
+                    // self.emit_function_block(out, *else_block, emitted, frames, frame, state, &then_l)?;
 
-                // Else
-                self.emit_function(out, *then_block, frames, frame, state, next_l)?;
+                    // Then 
+                    self.emit_function_block(out, *then_block, emitted, frames, frame, state, next_l)?;
+                } else {
+                    Instr::Jnz(else_l.clone()).emit(out)?;
+                    if emitted.contains(then_block) {
+                        Instr::Jmp(then_l).emit(out)?;
+                    }
+                    // Then
+                    self.emit_function_block(out, *then_block, emitted, frames, frame, state, Some(&else_l))?;
+
+                    // Else
+                    self.emit_function_block(out, *else_block, emitted, frames, frame, state, next_l)?;
+                }
             }
         }
         Ok(())
@@ -493,6 +559,7 @@ impl CFG {
 impl BasicBlock {
     fn emit(
         &self,
+        cfg: &CFG,
         out: &mut impl Write,
         frames: &HashMap<Ident, Frame>,
         frame: &Frame,
@@ -503,89 +570,116 @@ impl BasicBlock {
                 Quadruple::BinOp(dst, op1, bin_op, op2) => {
                     Instr::MovToReg(
                         RAX,
-                        Val::Mem(frame.get_variable_mem(*op1, state.rsp_offset)),
+                        Val::Mem(frame.get_variable_mem(*op1, state.rsp_displacement)),
                     )
                     .emit(out)?;
                     match bin_op {
                         BinOpType::Add => {
-                            Instr::Add(RAX, frame.get_val(*op2, state.rsp_offset)).emit(out)?
+                            Instr::Add(RAX, frame.get_val(*op2, state.rsp_displacement))
+                                .emit(out)?
                         }
                         BinOpType::Sub => {
-                            Instr::Sub(RAX, frame.get_val(*op2, state.rsp_offset)).emit(out)?
+                            Instr::Sub(RAX, frame.get_val(*op2, state.rsp_displacement))
+                                .emit(out)?
                         }
                         BinOpType::Mul => {
-                            Instr::IMul(RAX, frame.get_val(*op2, state.rsp_offset)).emit(out)?
+                            Instr::IMul(RAX, frame.get_val(*op2, state.rsp_displacement))
+                                .emit(out)?
                         }
                         BinOpType::Div => {
                             Instr::Cqo.emit(out)?;
-                            Instr::IDiv(frame.get_val(*op2, state.rsp_offset)).emit(out)?;
+                            Instr::IDiv(frame.get_val(*op2, state.rsp_displacement)).emit(out)?;
                         }
                         BinOpType::Mod => {
                             Instr::Cqo.emit(out)?;
-                            Instr::IDiv(frame.get_val(*op2, state.rsp_offset)).emit(out)?;
+                            Instr::IDiv(frame.get_val(*op2, state.rsp_displacement)).emit(out)?;
                             // mov remainder from RDX to RAX:
                             Instr::MovToReg(RAX, Val::Reg(RDX)).emit(out)?;
                         }
                         BinOpType::And => {
-                            Instr::And(RAX, frame.get_val(*op2, state.rsp_offset)).emit(out)?
+                            Instr::And(RAX, frame.get_val(*op2, state.rsp_displacement))
+                                .emit(out)?
                         }
                         BinOpType::Or => {
-                            Instr::Or(RAX, frame.get_val(*op2, state.rsp_offset)).emit(out)?
+                            Instr::Or(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
                         }
                         BinOpType::Xor => {
-                            Instr::Xor(RAX, frame.get_val(*op2, state.rsp_offset)).emit(out)?
+                            Instr::Xor(RAX, frame.get_val(*op2, state.rsp_displacement))
+                                .emit(out)?
                         }
                     };
-                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_offset), RAX)
+                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                         .emit(out)?
                 }
                 Quadruple::RelOp(dst, op1, rel_op, op2) => {
                     Instr::MovToReg(
                         RAX,
-                        Val::Mem(frame.get_variable_mem(*op1, state.rsp_offset)),
+                        Val::Mem(frame.get_variable_mem(*op1, state.rsp_displacement)),
                     )
                     .emit(out)?;
+                    let op2 = frame.get_val(*op2, state.rsp_displacement);
+                    Instr::Xor(RCX, Val::Reg(RCX)).emit(out)?;
+                    Instr::Cmp(RAX, op2).emit(out)?;
                     match rel_op {
-                        RelOpType::Gt => todo!(),
-                        RelOpType::Ge => todo!(),
-                        RelOpType::Lt => todo!(),
-                        RelOpType::Le => todo!(),
-                        RelOpType::Eq => todo!(),
-                        RelOpType::NEq => todo!(),
+                        RelOpType::Gt => Instr::Setgt.emit(out)?,
+                        RelOpType::Ge => Instr::Setge.emit(out)?,
+                        RelOpType::Lt => Instr::Setlt.emit(out)?,
+                        RelOpType::Le => Instr::Setle.emit(out)?,
+                        RelOpType::Eq => Instr::Sete.emit(out)?,
+                        RelOpType::NEq => Instr::Setne.emit(out)?,
                     }
+                    Instr::MovToMem(
+                        frame.get_variable_mem(*dst, state.rsp_displacement),
+                        RCX
+                    )
+                    .emit(out)?;
                 }
                 Quadruple::UnOp(dst, un_op_type, op) => {
-                    Instr::MovToReg(RAX, frame.get_val(*op, state.rsp_offset)).emit(out)?;
+                    Instr::MovToReg(RAX, frame.get_val(*op, state.rsp_displacement)).emit(out)?;
                     match un_op_type {
                         UnOpType::Not => Instr::Not(RAX).emit(out)?,
                         UnOpType::Neg => Instr::Neg(RAX).emit(out)?,
                         UnOpType::Inc => Instr::Inc(RAX).emit(out)?,
                         UnOpType::Dec => Instr::Dec(RAX).emit(out)?,
                     }
-                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_offset), RAX)
+                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                         .emit(out)?;
                 }
                 Quadruple::Copy(dst, src) => {
                     Instr::MovToReg(
                         RAX,
-                        Val::Mem(frame.get_variable_mem(*src, state.rsp_offset)),
+                        Val::Mem(frame.get_variable_mem(*src, state.rsp_displacement)),
                     )
                     .emit(out)?;
-                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_offset), RAX)
+                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                         .emit(out)?;
                 }
                 Quadruple::Set(dst, i) => {
                     Instr::MovToReg(RAX, Val::Instant(*i)).emit(out)?;
-                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_offset), RAX)
+                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                         .emit(out)?;
                 }
                 Quadruple::Call(dst, func, args) => {
-                    let stack_growth = frames.get(func).unwrap().local_variables_count * 8;
-                    Instr::Sub(RSP, Val::Instant(Instant(stack_growth as i64))).emit(out)?;
-                    for arg in args {}
+                    let callee_params = &cfg.functions.get(func).unwrap().params;
+                    let callee_frame = frames.get(func).unwrap();
+                    let stack_growth = callee_frame.frame_size - RETADDR_SIZE;
+                    
+                    state.advance_rsp(stack_growth as isize).emit(out)?;
+                    
+                    // place arguments in corresponding callee's variables
+                    for (arg, param) in args.iter().copied().zip(callee_params.iter().copied()) {
+                        Instr::MovToReg(RAX, frame.get_val(arg, state.rsp_displacement)).emit(out)?;
+                        Instr::MovToMem(
+                            callee_frame.get_variable_mem(param, -(RETADDR_SIZE as isize)),
+                            RAX,
+                        ).emit(out)?;
+                    }
                     Instr::Call(Label::Func(func.clone())).emit(out)?;
+                    
+                    state.reset_rsp().emit(out)?;
 
-                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_offset), RAX)
+                    // Save return value
+                    Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                         .emit(out)?;
                 }
 

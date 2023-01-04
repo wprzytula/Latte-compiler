@@ -11,3 +11,12 @@ int ssa(int n) {
     }
     return r;
 }
+
+void call_ssa() {
+    ssa(42);
+    int b = 2;
+    if (b > 2) {
+        b = ssa(b);
+        return;
+    }
+}
