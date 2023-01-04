@@ -20,7 +20,7 @@ enum Error {
     TypeCheck(TypeCheckError),
 
     #[error("IO error: {0}")]
-    IO(#[from] io::Error)
+    IO(#[from] io::Error),
 }
 
 impl Debug for Error {

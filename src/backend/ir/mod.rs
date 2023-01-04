@@ -82,6 +82,14 @@ fn mangle_method(name: &Ident, class: &Ident) -> Ident {
     Ident::from(format!("{}${}", name, class))
 }
 
+/** Built-in functions:
+ * void printInt(int)
+ * void printString(string)
+ * void error()
+ * int readInt()
+ * string readString()
+ */
+
 #[derive(Debug)]
 pub enum Quadruple {
     BinOp(Var, Var, BinOpType, Value), // dst, op1, op, op2
@@ -91,7 +99,11 @@ pub enum Quadruple {
     Set(Var, Instant),
 
     Call(Var, Ident, Vec<Value>),
-
+    // CallPrintInt(Value),
+    // CallPrintString(Var),
+    // CallError,
+    // CallReadInt,
+    // CallReadString,
     ArrLoad(Var, Var, Value),  // (dst, arr, idx)
     ArrStore(Var, Value, Var), // (arr, idx, src)
     DerefLoad(Var, Var),       // (dst, ptr)
@@ -159,7 +171,12 @@ impl CFG {
         let entry = self.functions.get(func_name).unwrap().entry;
         let mut variables = HashSet::new();
 
-        fn dfs_variables(cfg: &CFG, visited: &mut HashSet<BasicBlockIdx>, block_idx: BasicBlockIdx, variables: &mut HashSet<Var>) {
+        fn dfs_variables(
+            cfg: &CFG,
+            visited: &mut HashSet<BasicBlockIdx>,
+            block_idx: BasicBlockIdx,
+            variables: &mut HashSet<Var>,
+        ) {
             if visited.contains(&block_idx) {
                 return;
             } else {
@@ -171,7 +188,12 @@ impl CFG {
             }
         }
 
-        dfs_variables(self, &mut HashSet::<BasicBlockIdx>::new(), entry, &mut variables);
+        dfs_variables(
+            self,
+            &mut HashSet::<BasicBlockIdx>::new(),
+            entry,
+            &mut variables,
+        );
         variables
     }
 
@@ -496,7 +518,9 @@ impl Stmt {
                         }
                     } else {
                         // default value initialization
-                        cfg.current_mut().quadruples.push(Quadruple::Set(var, Instant(0)))
+                        cfg.current_mut()
+                            .quadruples
+                            .push(Quadruple::Set(var, Instant(0)))
                     }
                 }
             }
