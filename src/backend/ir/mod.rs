@@ -1,3 +1,5 @@
+mod opts;
+
 use std::{
     collections::{HashMap, HashSet},
     ops::{Deref, Index, IndexMut},
@@ -80,18 +82,6 @@ fn mangle_method(name: &Ident, class: &Ident) -> Ident {
     Ident::from(format!("{}${}", name, class))
 }
 
-fn rename_var(var: &mut Var, prev: Var, current: Var) {
-    if *var == prev {
-        *var = current;
-        println!("Renaming usage Var {} -> {}", prev.0, current.0);
-    }
-}
-fn rename_val(val: &mut Value, prev: Var, current: Var) {
-    if let Value::Variable(var) = val {
-        rename_var(var, prev, current)
-    }
-}
-
 #[derive(Debug)]
 pub enum Quadruple {
     BinOp(Var, Var, BinOpType, Value), // dst, op1, op, op2
@@ -108,69 +98,21 @@ pub enum Quadruple {
     DerefStore(Value, Var),    // (src, ptr)
 }
 
-impl Quadruple {
-    fn rename_usages(&mut self, prev: Var, current: Var) {
-        match self {
-            Quadruple::BinOp(_, var1, _, val) | Quadruple::RelOp(_, var1, _, val) => {
-                rename_var(var1, prev, current);
-                rename_val(val, prev, current);
-            }
-            Quadruple::UnOp(_, _, val) => rename_val(val, prev, current),
-            Quadruple::Copy(_, var) => rename_var(var, prev, current),
-            Quadruple::Set(_, _) => (),
-            Quadruple::Call(_, _, vals) => {
-                for val in vals {
-                    rename_val(val, prev, current);
-                }
-            }
-            Quadruple::ArrLoad(_, _, _) => todo!(),
-            Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _) => todo!(),
-            Quadruple::DerefStore(_, _) => todo!(),
-        }
-    }
-
-    fn assigns_to_var(&self, var: Var) -> bool {
-        match self {
-            Quadruple::BinOp(ass, _, _, _)
-            | Quadruple::RelOp(ass, _, _, _)
-            | Quadruple::UnOp(ass, _, _)
-            | Quadruple::Copy(ass, _)
-            | Quadruple::Set(ass, _)
-            | Quadruple::Call(ass, _, _) => *ass == var,
-            Quadruple::ArrLoad(_, _, _) => todo!(),
-            Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _) => todo!(),
-            Quadruple::DerefStore(_, _) => todo!(),
-        }
-    }
-
-    fn rename_assignment(&mut self, prev: Var, current: Var) {
-        println!("Renaming assignment of Var {} -> {}", prev.0, current.0);
-        assert!(self.assigns_to_var(prev));
-        match self {
-            Quadruple::BinOp(ass, _, _, _)
-            | Quadruple::RelOp(ass, _, _, _)
-            | Quadruple::UnOp(ass, _, _)
-            | Quadruple::Copy(ass, _)
-            | Quadruple::Set(ass, _)
-            | Quadruple::Call(ass, _, _) => *ass = current,
-            Quadruple::ArrLoad(_, _, _) => todo!(),
-            Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _) => todo!(),
-            Quadruple::DerefStore(_, _) => todo!(),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BasicBlockIdx(usize);
+
+#[derive(Debug)]
+pub struct CfgFunction {
+    pub entry: BasicBlockIdx,
+    pub typ: FunType,
+    pub params: Vec<Var>,
+}
 
 #[derive(Debug)]
 pub struct CFG {
     pub blocks: Vec<BasicBlock>,
     current_block_idx: BasicBlockIdx,
-    pub function_entries: HashMap<Ident, (BasicBlockIdx, FunType)>,
+    pub functions: HashMap<Ident, CfgFunction>,
 }
 
 impl CFG {
@@ -178,14 +120,21 @@ impl CFG {
         Self {
             blocks: vec![],
             current_block_idx: BasicBlockIdx(usize::MAX),
-            function_entries: HashMap::new(),
+            functions: HashMap::new(),
         }
     }
 
-    fn new_function(&mut self, id: Ident, fun_type: FunType) {
+    fn new_function(&mut self, id: Ident, fun_type: FunType, param_vars: Vec<Var>) {
         let entry = self.new_block();
-        self.function_entries
-            .insert(id, (entry, fun_type))
+        self.functions
+            .insert(
+                id,
+                CfgFunction {
+                    entry,
+                    typ: fun_type,
+                    params: param_vars,
+                },
+            )
             .ok_or(())
             .unwrap_err(); // assert unique name
         self.make_current(entry);
@@ -207,27 +156,30 @@ impl CFG {
     }
 
     pub fn variables_in_function(&self, func_name: &Ident) -> HashSet<Var> {
-        let (entry, _) = *self.function_entries.get(func_name).unwrap();
+        let entry = self.functions.get(func_name).unwrap().entry;
         let mut variables = HashSet::new();
 
-        fn dfs_variables(cfg: &CFG, block_idx: BasicBlockIdx, variables: &mut HashSet<Var>) {
+        fn dfs_variables(cfg: &CFG, visited: &mut HashSet<BasicBlockIdx>, block_idx: BasicBlockIdx, variables: &mut HashSet<Var>) {
+            if visited.contains(&block_idx) {
+                return;
+            } else {
+                visited.insert(block_idx);
+            }
             cfg[block_idx].defined_variables(variables);
             for succ in cfg[block_idx].successors.iter().copied() {
-                dfs_variables(cfg, succ, variables)
+                dfs_variables(cfg, visited, succ, variables)
             }
         }
 
-        dfs_variables(self, entry, &mut variables);
-
+        dfs_variables(self, &mut HashSet::<BasicBlockIdx>::new(), entry, &mut variables);
         variables
     }
 
     fn link_succ_and_pred(&mut self) {
         let entries = self
-            .function_entries
+            .functions
             .values()
-            .map(|(entry, _)| entry)
-            .copied()
+            .map(|cfg_func| cfg_func.entry)
             .collect::<Vec<_>>();
         let mut visited = vec![];
         for entry in entries {
@@ -257,150 +209,6 @@ impl CFG {
             Some(EndType::Return(_)) | None => (), // function end,
         };
     }
-
-    fn make_ssa(&mut self, state: &mut State) {
-        let mut phi_to_replace = vec![];
-
-        for (idx, block) in self.blocks.iter_mut().enumerate() {
-            let this = BasicBlockIdx(idx);
-            let vars = block.all_variables();
-
-            if block.predecessors.len() > 1 {
-                // insert (possibly reduntant) phi nodes
-                for var in vars.iter().copied() {
-                    block.phi_nodes.insert(
-                        var,
-                        block.predecessors.iter().map(|pred| (*pred, var)).collect(),
-                    );
-                }
-            }
-
-            for var in vars.iter().copied() {
-                let mut current;
-
-                // proceed with renaming variables
-
-                if block.predecessors.len() > 1 {
-                    // in case of a phi node block, variables are defined in phi nodes.
-                    let phi_node = block.phi_nodes.remove(&var).unwrap();
-                    current = state.fresh_reg(None);
-                    block.phi_nodes.insert(current, phi_node);
-                } else {
-                    // in case of a non-phi node block, variables are defined first in quadruples, so we need to rename them there.
-                    // but we don't rename variable uses until the first definition of that variable. Hence we do noop rename here.
-                    current = var;
-                }
-
-                for quadruple in block.quadruples.iter_mut() {
-                    quadruple.rename_usages(var, current);
-                    if quadruple.assigns_to_var(var) {
-                        current = state.fresh_reg(None);
-                        quadruple.rename_assignment(var, current);
-                    }
-                }
-
-                if current != var {
-                    // if we did rename some variable, let's rename end info as well.
-                    if let Some(ref mut end_info) = block.end_type {
-                        end_info.rename_usages(var, current)
-                    }
-
-                    // if we did rename some variable, let's propagate the change to our successors' phi nodes.
-                    for succ in block.successors.iter().copied() {
-                        phi_to_replace.push((succ, this, var, current));
-                    }
-                }
-            }
-        }
-
-        // Actually update successors' phi nodes.
-        for (succ, this, var, current) in phi_to_replace {
-            for (_, phi_node) in self[succ].phi_nodes.iter_mut() {
-                for used in phi_node
-                    .iter_mut()
-                    .filter_map(|(pred, then)| (*pred == this).then(|| then))
-                    .filter(|used| **used == var)
-                {
-                    *used = current;
-                }
-            }
-        }
-    }
-
-    /// Removes redundant variables and their corresponding phi nodes.
-    fn optimise_ssa(&mut self) {
-        println!("Removing redundant variables:");
-
-        fn exactly_one_mapping(phi_node: &VecMap<BasicBlockIdx, Var>) -> Option<Var> {
-            let mut one_mapping = None;
-            for (_edge, mapping) in phi_node {
-                match one_mapping {
-                    Some(one_mapping) if one_mapping == *mapping => (),
-                    Some(_) => return None,
-                    None => one_mapping = Some(*mapping),
-                }
-            }
-            one_mapping
-        }
-
-        let redundant_phi_nodes = self
-            .blocks
-            .iter()
-            .map(|block| {
-                block.phi_nodes.iter().filter_map(|(var, phi_node)| {
-                    exactly_one_mapping(phi_node).map(|mapping| {
-                        (*var, mapping) // (to_be_replaced, replaced_with)
-                    })
-                })
-            })
-            .flatten();
-
-        let redundant_copied_vars = self
-            .blocks
-            .iter()
-            .map(|block| {
-                block.quadruples.iter().filter_map(|quadruple| {
-                    if let Quadruple::Copy(to, from) = quadruple {
-                        Some((*to, *from))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .flatten();
-
-        let redundant_vars = redundant_phi_nodes
-            .chain(redundant_copied_vars)
-            .collect::<Vec<_>>();
-
-        for (redundant_var, replacement_var) in redundant_vars {
-            println!(
-                "Removing redundant var {}, replacing with {}.",
-                redundant_var.0, replacement_var.0
-            );
-            for block in self.blocks.iter_mut() {
-                block.phi_nodes.remove(&redundant_var);
-                for (_, phi_node) in block.phi_nodes.iter_mut() {
-                    for (_, var) in phi_node.iter_mut() {
-                        rename_var(var, redundant_var, replacement_var)
-                    }
-                }
-                for quadruple in block.quadruples.iter_mut() {
-                    quadruple.rename_usages(redundant_var, replacement_var);
-                }
-                block.quadruples.retain(|quadruple| match *quadruple {
-                    Quadruple::Copy(to, from) if to == redundant_var => {
-                        assert_eq!(from, replacement_var);
-                        false
-                    }
-                    _ => true,
-                });
-                if let Some(ref mut end_info) = block.end_type {
-                    end_info.rename_usages(redundant_var, replacement_var);
-                }
-            }
-        }
-    }
 }
 
 impl Index<BasicBlockIdx> for CFG {
@@ -421,17 +229,6 @@ pub enum EndType {
     Goto(BasicBlockIdx),
     IfElse(Var, BasicBlockIdx, BasicBlockIdx),
     Return(Option<Value>),
-}
-
-impl EndType {
-    fn rename_usages(&mut self, prev: Var, current: Var) {
-        match self {
-            EndType::IfElse(var, _, _) => rename_var(var, prev, current),
-            EndType::Return(Some(val)) => rename_val(val, prev, current),
-            EndType::Return(None) => (),
-            EndType::Goto(_) => (),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -599,14 +396,14 @@ mod state {
             )
         }
 
-        pub(super) fn enter_new_frame(
+        pub(super) fn enter_new_frame_and_give_params(
             &mut self,
             params: impl Iterator<Item = (Ident, NonvoidType)>,
-        ) {
+        ) -> Vec<Var> {
             self.var_location = Map::new();
-            for (param_name, param_type) in params {
-                self.declare_var(param_name, param_type);
-            }
+            params
+                .map(|(param_name, param_type)| self.declare_var(param_name, param_type))
+                .collect()
         }
 
         pub(super) fn declare_var(&mut self, id: Ident, typ: NonvoidType) -> Var {
@@ -636,19 +433,19 @@ impl Program {
         let mut state = State::new();
         let mut cfg = CFG::new();
         for func in self.0.iter() {
-            state.enter_new_frame(
+            let param_vars = state.enter_new_frame_and_give_params(
                 func.params
                     .iter()
                     .map(|param| (param.name.clone(), param.type_.clone())),
             );
-            cfg.new_function(func.name.clone(), func.fun_type());
+            cfg.new_function(func.name.clone(), func.fun_type(), param_vars);
             func.block.ir(&mut cfg, &mut state);
         }
 
         cfg.link_succ_and_pred();
-        println!("BEFORE SSA: max var = {}", state.fresh_reg(None).0);
-        cfg.make_ssa(&mut state);
-        cfg.optimise_ssa();
+        // eprintln!("BEFORE SSA: max var = {}", state.fresh_reg(None).0);
+        // cfg.make_ssa(&mut state);
+        // cfg.optimise_ssa();
         cfg
     }
 }
@@ -697,6 +494,9 @@ impl Stmt {
                                 cfg.current_mut().quadruples.push(Quadruple::Copy(var, reg))
                             }
                         }
+                    } else {
+                        // default value initialization
+                        cfg.current_mut().quadruples.push(Quadruple::Set(var, Instant(0)))
                     }
                 }
             }
