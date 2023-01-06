@@ -1,23 +1,45 @@
-// use latte::backend::compiler;
-// use latte::frontend::{parse, Prog};
-use std::error::Error;
+use std::fmt::{Debug, Display};
 use std::fs::{canonicalize, File};
-use std::io::{self, BufRead, BufReader, Write};
 
 use std::path::Path;
 use std::process::{Command, ExitStatus};
-use std::{env, mem};
+use std::rc::Rc;
+use std::{io, mem};
 
-const RUNTIME_PATH: &str = "lib/runtime.ll";
+use latte::frontend::{
+    parser::{build_parser, latteparser::ProgramContextAll},
+    semantic_analysis::{ast::Program, ConversionError, TypeCheckError},
+};
+use thiserror::Error;
+
+const RUNTIME_PATH: &str = "lib/runtime.o";
 
 pub fn execute(exe: &str, args: &[&str]) -> io::Result<ExitStatus> {
-    println!("{}", args.join(", "));
+    println!("Args: {}", args.join(", "));
     Command::new(exe).args(args).spawn()?.wait()
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    return Ok(());
-    // let tmp_path = env::var(key);
+#[derive(Error)]
+enum Error {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+
+    #[error("during parsing, described above")]
+    Parse,
+
+    #[error("Type check: {0}")]
+    Conversion(ConversionError),
+
+    #[error("Type check: {0}")]
+    TypeCheck(TypeCheckError),
+}
+impl Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <Self as Display>::fmt(&self, f)
+    }
+}
+
+fn main() -> Result<(), Error> {
     let path = std::env::args().nth(1).expect("Filename arg missing");
     let canonical_path = canonicalize(path)?;
     let progname = canonical_path
@@ -31,43 +53,64 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(Some("./"))
         .unwrap();
 
-    let latte_file = File::open(&canonical_path)?;
-    let latte_reader = BufReader::new(latte_file);
+    let (mut parser, was_error) = build_parser(&canonical_path);
+    let antlr_ast: Rc<ProgramContextAll<'_>> = match parser.program() {
+        Ok(program) => program,
+        Err(_) => return Err(Error::Parse),
+    };
 
-    let lines = latte_reader.lines().map(|res| res.expect("IO error"));
+    if was_error.get() {
+        return Err(Error::Parse);
+    }
+    let ast = Program::try_from(antlr_ast);
+    let program = match ast {
+        Ok(program) => match program.type_check() {
+            Ok(()) => {
+                eprintln!("OK");
+                program
+            }
+            Err(e) => {
+                eprintln!("ERROR");
+                return Err(Error::TypeCheck(e));
+            }
+        },
+        Err(err) => {
+            eprintln!("ERROR");
+            return Err(Error::Conversion(err));
+        }
+    };
 
-    // let ast = Prog(parse(lines).collect());
+    let cfg = program.ir();
 
-    // let nasm_code = compiler::compile(ast);
-    let s_filename = format!("{}.s", progname);
-    let s_filepath = Path::new(parent_path).join(s_filename);
+    let asm_filename = format!("{}.asm", progname);
+    let asm_filepath = Path::new(parent_path).join(asm_filename);
+    let mut asm_file = File::create(&asm_filepath)?;
+
+    cfg.emit_assembly(&mut asm_file)?;
+    mem::drop(asm_file); // also flushes
+
     let o_filename = format!("{}.o", progname);
     let o_filepath = Path::new(parent_path).join(o_filename);
     let bin_filename = progname.to_string();
     let bin_filepath = Path::new(parent_path).join(bin_filename);
-    let mut s_file = File::create(&s_filepath)?;
-
-    // for chunk in nasm_code {
-    //     write!(s_file, "{}", chunk)?;
-    // }
-    mem::drop(s_file); // also flushes
 
     execute(
         "nasm",
         &[
+            "-f",
+            "elf64",
             "-o",
             o_filepath.to_str().unwrap(),
-            s_filepath.to_str().unwrap(),
+            asm_filepath.to_str().unwrap(),
         ],
     )?;
 
     execute(
-        "ld",
+        "gcc",
         &[
-            "-s",
             "-o",
             bin_filepath.to_str().unwrap(),
-            // RUNTIME_PATH,
+            RUNTIME_PATH,
             o_filepath.to_str().unwrap(),
         ],
     )?;
