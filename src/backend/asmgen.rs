@@ -373,7 +373,7 @@ struct Frame {
     // stack_parameters_count: usize,
     local_variables_count: usize,
     variables_mapping: VecMap<ir::Var, Var>, // var -> offset wrt RBP (frame)
-    frame_size: usize,                       // in bytes
+    frame_size: usize,                       // in bytes, must be divisible by 16
 }
 
 impl Frame {
@@ -388,7 +388,7 @@ impl Frame {
 
         Self {
             local_variables_count: variables_mapping.len(),
-            frame_size: (variables_mapping.len() + 1) * QUADWORD_SIZE,
+            frame_size: ((variables_mapping.len() + 1/*retaddr*/) * QUADWORD_SIZE) / 16 * 16, /*stack alignment*/
             variables_mapping,
         }
     }
