@@ -8,3 +8,8 @@ antlr
 ./javaparser
 ./solution
 .antlr
+*.asm
+*.o
+solution
+javaparser
+.gdb_history
