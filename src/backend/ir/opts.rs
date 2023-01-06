@@ -1,6 +1,6 @@
 use vector_map::VecMap;
 
-use super::{state::State, BasicBlockIdx, EndType, Quadruple, Value, Var, CFG};
+use super::{gen::State, BasicBlockIdx, EndType, Quadruple, Value, Var, CFG};
 
 fn rename_var(var: &mut Var, prev: Var, current: Var) {
     if *var == prev {
