@@ -397,7 +397,9 @@ impl Frame {
         Self {
             convention: CallingConvention::StackVars,
             local_variables_count: variables_mapping.len(),
-            frame_size: ((variables_mapping.len() + 1/*retaddr*/) * QUADWORD_SIZE) / 16 * 16, /*stack alignment*/
+            frame_size: ((variables_mapping.len() + 1/*retaddr*/) * QUADWORD_SIZE + QUADWORD_SIZE)
+                / 16
+                * 16, /*stack alignment*/
             variables_mapping,
             params: vec![],
         }
@@ -503,7 +505,11 @@ impl CFG {
 
         eprintln!("Built frames: {:#?}\n\n", &frames);
 
-        emit_header(out, &mut state, frames.get(&"main".to_string()).unwrap())?;
+        emit_header(
+            out,
+            &mut state,
+            frames.get(&"real_main".to_string()).unwrap(),
+        )?;
 
         let mut emitted = HashSet::new();
 
@@ -820,22 +826,28 @@ impl Quadruple {
                             .emit(out)?;
                     }
                     CallingConvention::Cdecl => {
-                        // sanity alignment check
-                        // before call, the stack must be aligned to 8 mod 16
-                        Instr::MovToReg(RAX, Val::Reg(RSP)).emit(out)?;
-                        Instr::Cqo.emit(out)?;
-                        Instr::MovToReg(RCX, Val::Instant(Instant(16))).emit(out)?;
-                        Instr::IDivReg(RCX).emit(out)?;
-                        // mov remainder from RDX to RAX:
-                        Instr::Cmp(RDX, Val::Instant(Instant(8))).emit(out)?;
-                        Instr::Jnz(Label::Func(Ident::from("_notaligned"))).emit(out)?;
-
                         // place arguments in corresponding registers
                         for (arg, reg) in args.iter().copied().zip(params_registers()) {
                             Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
                                 .emit(out)?;
                         }
+
+                        // stack alignment, as no params on the stack
+                        Instr::Sub(RSP, Val::Instant(Instant(8))).emit(out)?;
+
+                        // // sanity alignment check
+                        // // before call, the stack must be aligned to 0 mod 16
+                        // Instr::MovToReg(RAX, Val::Reg(RSP)).emit(out)?;
+                        // Instr::Cqo.emit(out)?;
+                        // Instr::MovToReg(RCX, Val::Instant(Instant(16))).emit(out)?;
+                        // Instr::IDivReg(RCX).emit(out)?;
+                        // // mov remainder from RDX to RAX:
+                        // Instr::Test(RDX).emit(out)?;
+                        // Instr::Jnz(Label::Func(Ident::from("_notaligned"))).emit(out)?;
+
                         Instr::Call(Label::Func(func.clone())).emit(out)?;
+
+                        Instr::Add(RSP, Val::Instant(Instant(8))).emit(out)?;
 
                         // Save return value
                         Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
@@ -859,23 +871,25 @@ fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame
     }
     writeln!(out, "\nglobal main\n")?;
 
-    // Label::Func(Ident::from("_start".to_string())).emit(out)?;
+    Label::Func(Ident::from("main".to_string())).emit(out)?;
 
-    // let stack_growth = main_frame.frame_size - RETADDR_SIZE;
-    // if stack_growth != 0 {
-    //     state.advance_rsp(stack_growth as isize).emit(out)?;
-    // }
+    let stack_growth = main_frame.frame_size - RETADDR_SIZE;
+    if stack_growth != 0 {
+        state.advance_rsp(stack_growth as isize).emit(out)?;
+    }
 
-    // Instr::Call(Label::Func(Ident::from("main".to_string()))).emit(out)?;
+    Instr::Call(Label::Func(Ident::from("real_main".to_string()))).emit(out)?;
 
-    // if stack_growth != 0 {
-    //     state.reset_rsp().emit(out)?;
-    // }
+    if stack_growth != 0 {
+        state.reset_rsp().emit(out)?;
+    }
 
-    Label::Func(Ident::from("_notaligned")).emit(out)?;
-    Instr::MovToReg(RDI, Val::Instant(Instant(66))).emit(out)?;
-    Instr::MovToReg(RAX, Val::Instant(SYS_EXIT)).emit(out)?;
-    Instr::Syscall.emit(out)?;
+    Instr::Ret.emit(out)?;
+
+    // Label::Func(Ident::from("_notaligned")).emit(out)?;
+    // Instr::MovToReg(RDI, Val::Instant(Instant(66))).emit(out)?;
+    // Instr::MovToReg(RAX, Val::Instant(SYS_EXIT)).emit(out)?;
+    // Instr::Syscall.emit(out)?;
 
     Ok(())
 }

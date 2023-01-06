@@ -42,7 +42,10 @@ impl CFG {
         }
     }
 
-    fn new_function(&mut self, id: Ident, fun_type: FunType, param_vars: Vec<Var>) {
+    fn new_function(&mut self, mut id: Ident, fun_type: FunType, param_vars: Vec<Var>) {
+        if id == "main" {
+            id = "real_main".into();
+        }
         let entry = self.new_block();
         self.functions
             .insert(
@@ -828,9 +831,15 @@ impl LVal {
             LValInner::FunCall { name, args } => {
                 let args = args.iter().map(|arg| arg.ir(cfg, state)).collect();
                 let retvar = state.fresh_reg(typ.unwrap_or(VarType::INT));
-                cfg.current_mut()
-                    .quadruples
-                    .push(Quadruple::Call(retvar, name.clone(), args));
+                cfg.current_mut().quadruples.push(Quadruple::Call(
+                    retvar,
+                    if name == "main" {
+                        "real_main".into()
+                    } else {
+                        name.clone()
+                    },
+                    args,
+                ));
                 retvar
             }
 
