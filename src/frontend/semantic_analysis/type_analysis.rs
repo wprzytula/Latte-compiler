@@ -263,60 +263,9 @@ impl Program {
     pub fn type_check(&self) -> Result<(), TypeCheckError> {
         let mut initial_env = Env::new();
 
-        /* printInt */
-        initial_env
-            .declare_function(
-                "printInt".to_owned().into(),
-                FunType {
-                    ret_type: DataType::TVoid,
-                    params: vec![NonvoidType::TInt],
-                },
-            )
-            .unwrap();
-
-        /* printString */
-        initial_env
-            .declare_function(
-                "printString".to_owned().into(),
-                FunType {
-                    ret_type: DataType::TVoid,
-                    params: vec![NonvoidType::TString],
-                },
-            )
-            .unwrap();
-
-        /* error */
-        initial_env
-            .declare_function(
-                "error".to_owned().into(),
-                FunType {
-                    ret_type: DataType::TVoid,
-                    params: vec![],
-                },
-            )
-            .unwrap();
-
-        /* readInt */
-        initial_env
-            .declare_function(
-                "readInt".to_owned().into(),
-                FunType {
-                    ret_type: DataType::Nonvoid(NonvoidType::TInt),
-                    params: vec![],
-                },
-            )
-            .unwrap();
-
-        /* readString */
-        initial_env
-            .declare_function(
-                "readString".to_owned().into(),
-                FunType {
-                    ret_type: DataType::Nonvoid(NonvoidType::TString),
-                    params: vec![],
-                },
-            )
-            .unwrap();
+        for (func_name, func_type) in INITIAL_FUNCS.iter().cloned() {
+            initial_env.declare_function(func_name, func_type).unwrap();
+        }
 
         self.type_check_with_env(&mut initial_env)
     }
@@ -337,7 +286,7 @@ impl Program {
                 .map_err(|_| TypeCheckError::MultipleClassDefinition(*pos, class.clone()))?;
         }
 
-        if env.get_function_type(&"main".to_owned().into()).is_err() {
+        if env.get_function_type(&"main".to_owned()).is_err() {
             return Err(TypeCheckError::NoMain);
         }
 

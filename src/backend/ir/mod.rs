@@ -82,14 +82,6 @@ fn mangle_method(name: &Ident, class: &Ident) -> Ident {
     Ident::from(format!("{}${}", name, class))
 }
 
-/** Built-in functions:
- * void printInt(int)
- * void printString(string)
- * void error()
- * int readInt()
- * string readString()
- */
-
 #[derive(Debug)]
 pub enum Quadruple {
     BinOp(Var, Var, BinOpType, Value), // dst, op1, op, op2
@@ -128,11 +120,32 @@ pub struct CFG {
 }
 
 impl CFG {
-    fn new() -> Self {
+    /** Built-in functions:
+     * void printInt(int)
+     * void printString(string)
+     * void error()
+     * int readInt()
+     * string readString()
+     */
+    fn new(state: &mut State) -> Self {
+        let built_in_functions = INITIAL_FUNCS[(
+            "printInt".to_string().into(),
+            CfgFunction {
+                entry: BasicBlockIdx(0),
+                typ: todo!(),
+                params: [NonvoidType::TInt]
+                    .into_iter()
+                    .map(|typ| state.fresh_reg(typ))
+                    .collect(),
+            },
+        )]
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+
         Self {
             blocks: vec![],
             current_block_idx: BasicBlockIdx(usize::MAX),
-            functions: HashMap::new(),
+            functions: built_in_functions,
         }
     }
 

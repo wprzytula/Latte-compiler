@@ -472,11 +472,7 @@ impl CFG {
 
         eprintln!("Built frames: {:#?}\n\n", &frames);
 
-        emit_start(
-            out,
-            &mut state,
-            frames.get(&"main".to_string()).unwrap(),
-        )?;
+        emit_start(out, &mut state, frames.get(&"main".to_string()).unwrap())?;
 
         let mut emitted = HashSet::new();
 

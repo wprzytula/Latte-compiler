@@ -4,13 +4,13 @@ use std::{
 };
 
 use either::Either;
+use lazy_static::lazy_static;
 use rpds::RedBlackTreeMap as Map;
+use thiserror::Error;
 
 use super::ast::{DataType, Ident, NonvoidType, RetType};
 
-use thiserror::Error;
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunType {
     pub ret_type: RetType,
     pub params: Vec<NonvoidType>,
@@ -56,6 +56,46 @@ impl<'a> Display for CircularDependencyDisplay<'a> {
         }
         f.write_char(')')
     }
+}
+
+lazy_static! {
+    pub static ref INITIAL_FUNCS: Vec<(Ident, FunType)> = vec![
+        (
+            "printInt".to_owned(),
+            FunType {
+                ret_type: DataType::TVoid,
+                params: vec![NonvoidType::TInt],
+            }
+        ),
+        (
+            "printString".to_owned().into(),
+            FunType {
+                ret_type: DataType::TVoid,
+                params: vec![NonvoidType::TString]
+            }
+        ),
+        (
+            "error".to_owned().into(),
+            FunType {
+                ret_type: DataType::TVoid,
+                params: vec![],
+            }
+        ),
+        (
+            "readInt".to_owned().into(),
+            FunType {
+                ret_type: DataType::Nonvoid(NonvoidType::TInt),
+                params: vec![],
+            }
+        ),
+        (
+            "readString".to_owned().into(),
+            FunType {
+                ret_type: DataType::Nonvoid(NonvoidType::TString),
+                params: vec![],
+            }
+        ),
+    ];
 }
 
 pub struct Env {
