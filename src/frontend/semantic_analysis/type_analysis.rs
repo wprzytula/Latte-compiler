@@ -7,6 +7,7 @@ use super::{
         DoubleVariableDeclarationError, Env, FunType, MissingBaseClassDeclarationError,
         MissingClassDeclarationError,
     },
+    INITIAL_FUNCS,
 };
 
 use enum_as_inner::EnumAsInner;

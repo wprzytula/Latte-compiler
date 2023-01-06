@@ -9,7 +9,7 @@ use vector_map::VecMap;
 
 use crate::frontend::semantic_analysis::{
     ast::{self, *},
-    FunType,
+    FunType, INITIAL_FUNCS,
 };
 
 use self::state::State;
@@ -128,18 +128,23 @@ impl CFG {
      * string readString()
      */
     fn new(state: &mut State) -> Self {
-        let built_in_functions = INITIAL_FUNCS[(
-            "printInt".to_string().into(),
-            CfgFunction {
-                entry: BasicBlockIdx(0),
-                typ: todo!(),
-                params: [NonvoidType::TInt]
-                    .into_iter()
-                    .map(|typ| state.fresh_reg(typ))
-                    .collect(),
-            },
-        )]
-            .into_iter()
+        let built_in_functions = INITIAL_FUNCS
+            .iter()
+            .cloned()
+            .map(|(name, fun_type)| {
+                (
+                    name,
+                    CfgFunction {
+                        entry: BasicBlockIdx(0),
+                        params: fun_type
+                            .params
+                            .iter()
+                            .map(|typ| state.fresh_reg(Some(typ.clone())))
+                            .collect(),
+                        typ: fun_type,
+                    },
+                )
+            })
             .collect::<HashMap<_, _>>();
 
         Self {
@@ -466,7 +471,8 @@ mod state {
 impl Program {
     pub fn ir(&self) -> CFG {
         let mut state = State::new();
-        let mut cfg = CFG::new();
+        let mut cfg = CFG::new(&mut state);
+
         for func in self.0.iter() {
             let param_vars = state.enter_new_frame_and_give_params(
                 func.params
