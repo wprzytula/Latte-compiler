@@ -22,6 +22,7 @@ impl CFG {
                 (
                     name,
                     CfgFunction {
+                        convention: CallingConvention::Cdecl,
                         entry: BasicBlockIdx(0),
                         params: fun_type
                             .params
@@ -47,6 +48,7 @@ impl CFG {
             .insert(
                 id,
                 CfgFunction {
+                    convention: CallingConvention::StackVars,
                     entry,
                     typ: fun_type,
                     params: param_vars,

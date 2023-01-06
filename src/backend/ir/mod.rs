@@ -1,8 +1,6 @@
 mod gen;
 mod opts;
 
-use gen::State;
-
 use std::{
     collections::{HashMap, HashSet},
     ops::{Deref, Index, IndexMut},
@@ -102,8 +100,15 @@ pub enum Quadruple {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BasicBlockIdx(usize);
 
+#[derive(Debug, Clone, Copy)]
+pub enum CallingConvention {
+    StackVars,
+    Cdecl,
+}
+
 #[derive(Debug)]
 pub struct CfgFunction {
+    pub convention: CallingConvention,
     pub entry: BasicBlockIdx,
     pub typ: FunType,
     pub params: Vec<Var>,

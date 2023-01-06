@@ -9,13 +9,17 @@ use vector_map::VecMap;
 use crate::frontend::semantic_analysis::ast::Ident;
 
 use super::ir::{
-    self, BasicBlock, BasicBlockIdx, BinOpType, CfgFunction, EndType, Instant, Quadruple,
-    RelOpType, UnOpType, CFG,
+    self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, CfgFunction, EndType, Instant,
+    Quadruple, RelOpType, UnOpType, CFG,
 };
 
 const ARGS_IN_REGISTERS: usize = 6;
 const QUADWORD_SIZE: usize = 8; // in bytes
 const RETADDR_SIZE: usize = QUADWORD_SIZE;
+
+fn params_registers() -> impl Iterator<Item = Reg> {
+    [RDI, RSI, RDX, RCX, R8, R9].into_iter()
+}
 
 const SYS_EXIT: Instant = Instant(60);
 
@@ -371,6 +375,8 @@ impl Instr {
 #[derive(Debug)]
 struct Frame {
     // stack_parameters_count: usize,
+    convention: CallingConvention,
+    params: Vec<ir::Var>,
     local_variables_count: usize,
     variables_mapping: VecMap<ir::Var, Var>, // var -> offset wrt RBP (frame)
     frame_size: usize,                       // in bytes, must be divisible by 16
@@ -387,9 +393,21 @@ impl Frame {
         eprintln!("Variables got mappings: {:?}", &variables_mapping);
 
         Self {
+            convention: CallingConvention::StackVars,
             local_variables_count: variables_mapping.len(),
             frame_size: ((variables_mapping.len() + 1/*retaddr*/) * QUADWORD_SIZE) / 16 * 16, /*stack alignment*/
             variables_mapping,
+            params: vec![],
+        }
+    }
+
+    fn new_cdecl(params: Vec<ir::Var>) -> Self {
+        Self {
+            convention: CallingConvention::Cdecl,
+            local_variables_count: 0,
+            variables_mapping: VecMap::new(),
+            frame_size: RETADDR_SIZE,
+            params,
         }
     }
 
@@ -457,17 +475,28 @@ impl CFG {
         let frames = self
             .functions
             .iter()
-            .map(|(func, CfgFunction { params, .. })| {
-                let mut variables = self.variables_in_function(func);
-                variables.extend(params);
-                (
-                    func.clone(),
-                    Frame::new(
-                        isize::max(params.len() as isize - ARGS_IN_REGISTERS as isize, 0) as usize,
-                        variables,
-                    ),
-                )
-            })
+            .map(
+                |(
+                    func,
+                    CfgFunction {
+                        params, convention, ..
+                    },
+                )| {
+                    let mut variables = self.variables_in_function(func);
+                    variables.extend(params);
+                    (
+                        func.clone(),
+                        match convention {
+                            CallingConvention::StackVars => Frame::new(
+                                isize::max(params.len() as isize - ARGS_IN_REGISTERS as isize, 0)
+                                    as usize,
+                                variables,
+                            ),
+                            CallingConvention::Cdecl => Frame::new_cdecl(params.clone()),
+                        },
+                    )
+                },
+            )
             .collect::<HashMap<_, _>>();
 
         eprintln!("Built frames: {:#?}\n\n", &frames);
@@ -476,23 +505,31 @@ impl CFG {
 
         let mut emitted = HashSet::new();
 
-        for (func, CfgFunction { entry, .. }) in self.functions.iter() {
-            assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
-            let func_label = Label::Func(func.clone());
+        for (
+            func,
+            CfgFunction {
+                entry, convention, ..
+            },
+        ) in self.functions.iter()
+        {
+            if matches!(convention, CallingConvention::StackVars) {
+                assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
+                let func_label = Label::Func(func.clone());
 
-            eprintln!("\nEmitting function: {}", func);
-            writeln!(out, "")?;
-            func_label.emit(out)?;
+                eprintln!("\nEmitting function: {}", func);
+                writeln!(out, "")?;
+                func_label.emit(out)?;
 
-            self.emit_function_block(
-                out,
-                *entry,
-                &mut emitted,
-                &frames,
-                frames.get(func).unwrap(),
-                &mut state,
-                None,
-            )?;
+                self.emit_function_block(
+                    out,
+                    *entry,
+                    &mut emitted,
+                    &frames,
+                    frames.get(func).unwrap(),
+                    &mut state,
+                    None,
+                )?;
+            }
         }
 
         Ok(())
@@ -731,32 +768,52 @@ impl Quadruple {
                     .emit(out)?;
             }
             Quadruple::Call(dst, func, args) => {
-                let callee_params = &cfg.functions.get(func).unwrap().params;
-                let callee_frame = frames.get(func).unwrap();
-                let stack_growth = callee_frame.frame_size - RETADDR_SIZE;
+                let cfg_function = cfg.functions.get(func).unwrap();
+                let callee_params = &cfg_function.params;
+                let callee_convention = &cfg_function.convention;
+                match callee_convention {
+                    CallingConvention::StackVars => {
+                        let callee_frame = frames.get(func).unwrap();
+                        let stack_growth = callee_frame.frame_size - RETADDR_SIZE;
 
-                if stack_growth != 0 {
-                    state.advance_rsp(stack_growth as isize).emit(out)?;
+                        if stack_growth != 0 {
+                            state.advance_rsp(stack_growth as isize).emit(out)?;
+                        }
+
+                        // place arguments in corresponding callee's variables
+                        for (arg, param) in args.iter().copied().zip(callee_params.iter().copied())
+                        {
+                            Instr::MovToReg(RAX, frame.get_val(arg, state.rsp_displacement))
+                                .emit(out)?;
+                            Instr::MovToMem(
+                                callee_frame.get_variable_mem(param, -(RETADDR_SIZE as isize)),
+                                RAX,
+                            )
+                            .emit(out)?;
+                        }
+                        Instr::Call(Label::Func(func.clone())).emit(out)?;
+
+                        if stack_growth != 0 {
+                            state.reset_rsp().emit(out)?;
+                        }
+
+                        // Save return value
+                        Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                            .emit(out)?;
+                    }
+                    CallingConvention::Cdecl => {
+                        // place arguments in corresponding registers
+                        for (arg, reg) in args.iter().copied().zip(params_registers()) {
+                            Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
+                                .emit(out)?;
+                        }
+                        Instr::Call(Label::Func(func.clone())).emit(out)?;
+
+                        // Save return value
+                        Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                            .emit(out)?;
+                    }
                 }
-
-                // place arguments in corresponding callee's variables
-                for (arg, param) in args.iter().copied().zip(callee_params.iter().copied()) {
-                    Instr::MovToReg(RAX, frame.get_val(arg, state.rsp_displacement)).emit(out)?;
-                    Instr::MovToMem(
-                        callee_frame.get_variable_mem(param, -(RETADDR_SIZE as isize)),
-                        RAX,
-                    )
-                    .emit(out)?;
-                }
-                Instr::Call(Label::Func(func.clone())).emit(out)?;
-
-                if stack_growth != 0 {
-                    state.reset_rsp().emit(out)?;
-                }
-
-                // Save return value
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
-                    .emit(out)?;
             }
 
             Quadruple::ArrLoad(_, _, _) => todo!(),
