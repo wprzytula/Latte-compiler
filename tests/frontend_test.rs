@@ -2,7 +2,7 @@ use std::{fs::read_dir, iter::repeat, path::Path};
 
 use latte::frontend::{
     parser::build_parser,
-    semantic_analysis::{Program, TypeCheckError},
+    semantic_analysis::{ast::Program, TypeCheckError},
 };
 
 #[derive(Debug)]

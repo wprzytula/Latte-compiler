@@ -110,7 +110,7 @@ impl Env {
         id: &Ident,
     ) -> Result<&NonvoidType, MissingVariableDeclarationError> {
         self.variables
-            .get(&id)
+            .get(id)
             .map(|type_scope_init| &type_scope_init.0)
             .ok_or(MissingVariableDeclarationError(id.clone()))
     }

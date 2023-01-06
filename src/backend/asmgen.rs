@@ -475,7 +475,7 @@ impl CFG {
         emit_start(
             out,
             &mut state,
-            frames.get(&"main".to_string().into()).unwrap(),
+            frames.get(&"main".to_string()).unwrap(),
         )?;
 
         let mut emitted = HashSet::new();

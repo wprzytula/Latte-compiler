@@ -6,7 +6,6 @@ use std::{
     fmt::{self, Display, Write},
     hash::{self, Hash},
     ops::Deref,
-    rc::Rc,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -384,27 +383,7 @@ pub enum ExprInner {
     LVal(Box<LVal>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Ident(Rc<String>);
-impl From<String> for Ident {
-    fn from(s: String) -> Self {
-        Self(Rc::new(s))
-    }
-}
-
-impl Display for Ident {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Deref for Ident {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+pub type Ident = String;
 
 // semantics: the bool signifies _certainty_ of the return
 // (i.e., the execution that can never reach behind that statement)
