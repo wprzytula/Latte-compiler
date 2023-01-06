@@ -27,7 +27,7 @@ impl CFG {
                         params: fun_type
                             .params
                             .iter()
-                            .map(|typ| state.fresh_reg(Some(typ.clone())))
+                            .map(|typ| state.fresh_reg(typ.clone().into()))
                             .collect(),
                         typ: fun_type,
                     },
@@ -228,8 +228,12 @@ mod state {
     use std::ops::{Deref, DerefMut};
 
     use rpds::RedBlackTreeMap as Map;
+    use vector_map::VecMap;
 
-    use crate::frontend::semantic_analysis::ast::{Ident, NonvoidType};
+    use crate::{
+        backend::ir::VarType,
+        frontend::semantic_analysis::ast::{Ident, NonvoidType},
+    };
 
     use super::Var;
 
@@ -240,6 +244,7 @@ mod state {
             // self.0.next_label_num = self.1.next_label_num;
             self.0.next_var_num = self.1.next_var_num;
             std::mem::swap(&mut self.0.string_literals, &mut self.1.string_literals);
+            std::mem::swap(&mut self.0.var_types, &mut self.1.var_types);
         }
     }
 
@@ -257,10 +262,13 @@ mod state {
     }
 
     pub struct State {
+        /* state-like flow */
         string_literals: Vec<String>,
         next_var_num: usize,
+        var_types: VecMap<Var, VarType>,
+
+        /* env-like flow */
         var_location: Map<Ident, Var>,
-        var_types: Vec<Option<NonvoidType>>,
     }
     impl State {
         pub(crate) fn new() -> Self {
@@ -268,18 +276,19 @@ mod state {
                 next_var_num: 0,
                 string_literals: Vec::new(),
                 var_location: Map::new(),
-                var_types: Vec::new(),
+                var_types: VecMap::new(),
             }
         }
 
-        pub(crate) fn fresh_reg(&mut self, typ: Option<NonvoidType>) -> Var {
+        pub(crate) fn fresh_reg(&mut self, typ: VarType) -> Var {
             let var = Var(self.next_var_num);
+            self.var_types.insert(var, typ);
             self.next_var_num += 1;
             var
         }
 
-        pub(crate) fn get_var_type(&self, var: Var) -> &Option<NonvoidType> {
-            &self.var_types[var.0]
+        pub(crate) fn get_var_type(&self, var: Var) -> Option<&VarType> {
+            self.var_types.get(&var)
         }
 
         pub(crate) fn new_scope<'a>(&'a mut self) -> StateGuard<'a> {
@@ -568,24 +577,26 @@ impl Expr {
                 Op::UnOp(un_op, a) => match un_op {
                     ast::UnOpType::Neg => match a.ir(cfg, state) {
                         Value::Instant(i) => Value::Instant(Instant(-*i)),
-                        var => {
-                            let tmp = state.fresh_reg(None);
+                        val @ Value::Variable(var) => {
+                            let typ = state.get_var_type(var).unwrap();
+                            let tmp = state.fresh_reg(typ.clone());
                             cfg.current_mut().quadruples.push(Quadruple::UnOp(
                                 tmp,
                                 UnOpType::Neg,
-                                var,
+                                val,
                             ));
                             Value::Variable(tmp)
                         }
                     },
                     ast::UnOpType::Not => match a.ir(cfg, state) {
                         Value::Instant(i) => Value::Instant(i.not()),
-                        var => {
-                            let tmp = state.fresh_reg(None);
+                        val @ Value::Variable(var) => {
+                            let typ = state.get_var_type(var).unwrap();
+                            let tmp = state.fresh_reg(typ.clone());
                             cfg.current_mut().quadruples.push(Quadruple::UnOp(
                                 tmp,
                                 UnOpType::Not,
-                                var,
+                                val,
                             ));
                             Value::Variable(tmp)
                         }
@@ -618,15 +629,29 @@ impl Expr {
                         });
                     }
 
-                    let tmp = state.fresh_reg(None);
+                    let typ = match (a_val, b_val) {
+                        (Value::Instant(_), Value::Instant(_)) => {
+                            unreachable!("Case covered above")
+                        }
+                        (Value::Instant(_), Value::Variable(var))
+                        | (Value::Variable(var), Value::Instant(_))
+                        | (Value::Variable(var), Value::Variable(_)) => match bin_op {
+                            ast::BinOpType::IntOp(_) => VarType::INT,
+                            ast::BinOpType::Add | ast::BinOpType::Eq | ast::BinOpType::NEq => {
+                                state.get_var_type(var).unwrap().clone()
+                            }
+                        },
+                    };
+
                     let a_var = match a_val {
                         Value::Instant(i) => {
-                            let var = state.fresh_reg(None);
+                            let var = state.fresh_reg(VarType::INT);
                             cfg.current_mut().quadruples.push(Quadruple::Set(var, i));
                             var
                         }
                         Value::Variable(var) => var,
                     };
+                    let tmp = state.fresh_reg(typ);
                     match bin_op {
                         ast::BinOpType::IntOp(op) => match op {
                             IntOpType::IntRet(op) => {
@@ -729,7 +754,7 @@ impl Expr {
                                     cfg[else_block_idx].end_type =
                                         Some(EndType::Goto(next_block_idx));
 
-                                    let res_var = state.fresh_reg(Some(NonvoidType::TBoolean));
+                                    let res_var = state.fresh_reg(VarType::BOOL);
                                     match log_op {
                                         LogOpType::And => {
                                             cfg[pre_block_idx].end_type = Some(EndType::IfElse(
@@ -773,7 +798,7 @@ impl Expr {
             ExprInner::IntLit(n) => Value::Instant(Instant(*n)),
             ExprInner::BoolLit(b) => Value::Instant(Instant::bool(*b)),
             ExprInner::StringLit(s) => {
-                let reg = state.fresh_reg(Some(NonvoidType::TString));
+                let reg = state.fresh_reg(VarType::STRING);
                 let lit = state.register_literal(s.clone());
                 cfg.current_mut()
                     .quadruples
@@ -794,7 +819,7 @@ impl LVal {
 
     fn ir(&self, cfg: &mut CFG, state: &mut State) -> Var {
         let typ = if let DataType::Nonvoid(nonvoid) = self.2.borrow().as_ref().unwrap() {
-            Some(nonvoid.clone())
+            Some(nonvoid.clone().into())
         } else {
             None
         };
@@ -802,7 +827,7 @@ impl LVal {
             LValInner::Id(var_id) => state.retrieve_var(var_id),
             LValInner::FunCall { name, args } => {
                 let args = args.iter().map(|arg| arg.ir(cfg, state)).collect();
-                let retvar = state.fresh_reg(typ);
+                let retvar = state.fresh_reg(typ.unwrap_or(VarType::INT));
                 cfg.current_mut()
                     .quadruples
                     .push(Quadruple::Call(retvar, name.clone(), args));

@@ -81,7 +81,7 @@ impl EndType {
 }
 
 impl CFG {
-    fn make_ssa(&mut self, state: &mut State) {
+    pub fn make_ssa(&mut self, state: &mut State) {
         let mut phi_to_replace = vec![];
 
         for (idx, block) in self.blocks.iter_mut().enumerate() {
@@ -99,6 +99,7 @@ impl CFG {
             }
 
             for var in vars.iter().copied() {
+                let typ = state.get_var_type(var).unwrap().clone();
                 let mut current;
 
                 // proceed with renaming variables
@@ -106,7 +107,7 @@ impl CFG {
                 if block.predecessors.len() > 1 {
                     // in case of a phi node block, variables are defined in phi nodes.
                     let phi_node = block.phi_nodes.remove(&var).unwrap();
-                    current = state.fresh_reg(None);
+                    current = state.fresh_reg(typ.clone());
                     block.phi_nodes.insert(current, phi_node);
                 } else {
                     // in case of a non-phi node block, variables are defined first in quadruples, so we need to rename them there.
@@ -117,7 +118,7 @@ impl CFG {
                 for quadruple in block.quadruples.iter_mut() {
                     quadruple.rename_usages(var, current);
                     if quadruple.assigns_to_var(var) {
-                        current = state.fresh_reg(None);
+                        current = state.fresh_reg(typ.clone());
                         quadruple.rename_assignment(var, current);
                     }
                 }
@@ -151,7 +152,7 @@ impl CFG {
     }
 
     /// Removes redundant variables and their corresponding phi nodes.
-    fn optimise_ssa(&mut self) {
+    pub fn optimise_ssa(&mut self) {
         println!("Removing redundant variables:");
 
         fn exactly_one_mapping(phi_node: &VecMap<BasicBlockIdx, Var>) -> Option<Var> {

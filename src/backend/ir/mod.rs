@@ -77,6 +77,47 @@ pub enum RelOpType {
     NEq,
 }
 
+#[derive(Debug, Clone)]
+pub enum VarType {
+    Simple(SimpleVarType),
+    Ptr(PtrVarType),
+    ArrSimple(SimpleVarType),
+    ArrPtr(PtrVarType),
+}
+
+impl VarType {
+    const INT: VarType = VarType::Simple(SimpleVarType::Int);
+    const BOOL: VarType = VarType::Simple(SimpleVarType::Bool);
+    const STRING: VarType = VarType::Ptr(PtrVarType::String);
+}
+
+#[derive(Debug, Clone)]
+pub enum SimpleVarType {
+    Int,
+    Bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum PtrVarType {
+    String,
+    Class(Ident),
+}
+
+impl From<NonvoidType> for VarType {
+    fn from(t: NonvoidType) -> Self {
+        match t {
+            NonvoidType::TInt => VarType::INT,
+            NonvoidType::TString => VarType::STRING,
+            NonvoidType::TBoolean => VarType::BOOL,
+            NonvoidType::TClass(_) => todo!(),
+            NonvoidType::TIntArr => todo!(),
+            NonvoidType::TStringArr => todo!(),
+            NonvoidType::TBooleanArr => todo!(),
+            NonvoidType::TClassArr(_) => todo!(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Quadruple {
     BinOp(Var, Var, BinOpType, Value), // dst, op1, op, op2
@@ -86,11 +127,7 @@ pub enum Quadruple {
     Set(Var, Instant),
 
     Call(Var, Ident, Vec<Value>),
-    // CallPrintInt(Value),
-    // CallPrintString(Var),
-    // CallError,
-    // CallReadInt,
-    // CallReadString,
+
     ArrLoad(Var, Var, Value),  // (dst, arr, idx)
     ArrStore(Var, Value, Var), // (arr, idx, src)
     DerefLoad(Var, Var),       // (dst, ptr)

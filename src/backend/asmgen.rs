@@ -6,7 +6,7 @@ use std::{
 
 use vector_map::VecMap;
 
-use crate::frontend::semantic_analysis::ast::Ident;
+use crate::frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS};
 
 use super::ir::{
     self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, CfgFunction, EndType, Instant,
@@ -289,8 +289,9 @@ enum Instr {
     Add(Reg, Val),
     Sub(Reg, Val),
     IMul(Reg, Val),
-    IDiv(Val), // RDX:RAX divided by Val, quotient in RAX, remainder in RDX.
-    Cqo,       // Prepared RDX as empty for IDiv
+    IDivReg(Reg), // RDX:RAX divided by Reg, quotient in RAX, remainder in RDX.
+    IDivMem(Mem), // RDX:RAX divided by Mem, quotient in RAX, remainder in RDX.
+    Cqo,          // Prepared RDX as empty for IDiv
     Inc(Reg),
     Dec(Reg),
     Neg(Reg),
@@ -338,7 +339,8 @@ impl Instr {
             Instr::Add(reg, val) => writeln!(out, "add {}, {}", reg, val),
             Instr::Sub(reg, val) => writeln!(out, "sub {}, {}", reg, val),
             Instr::IMul(reg, val) => writeln!(out, "imul {}, {}", reg, val),
-            Instr::IDiv(val) => writeln!(out, "idiv {}", val),
+            Instr::IDivReg(reg) => writeln!(out, "idiv {}", reg),
+            Instr::IDivMem(mem) => writeln!(out, "idiv {}", mem),
             Instr::Cqo => writeln!(out, "cqo"),
             Instr::Inc(reg) => writeln!(out, "inc {}", reg),
             Instr::Dec(reg) => writeln!(out, "dec {}", reg),
@@ -501,7 +503,7 @@ impl CFG {
 
         eprintln!("Built frames: {:#?}\n\n", &frames);
 
-        emit_start(out, &mut state, frames.get(&"main".to_string()).unwrap())?;
+        emit_header(out, &mut state, frames.get(&"main".to_string()).unwrap())?;
 
         let mut emitted = HashSet::new();
 
@@ -701,11 +703,27 @@ impl Quadruple {
                     }
                     BinOpType::Div => {
                         Instr::Cqo.emit(out)?;
-                        Instr::IDiv(frame.get_val(*op2, state.rsp_displacement)).emit(out)?;
+                        let val = frame.get_val(*op2, state.rsp_displacement);
+                        match val {
+                            Val::Reg(reg) => Instr::IDivReg(reg).emit(out)?,
+                            Val::Instant(i) => {
+                                Instr::MovToReg(RCX, val).emit(out)?;
+                                Instr::IDivReg(RCX).emit(out)?;
+                            }
+                            Val::Mem(mem) => Instr::IDivMem(mem).emit(out)?,
+                        }
                     }
                     BinOpType::Mod => {
                         Instr::Cqo.emit(out)?;
-                        Instr::IDiv(frame.get_val(*op2, state.rsp_displacement)).emit(out)?;
+                        let val = frame.get_val(*op2, state.rsp_displacement);
+                        match val {
+                            Val::Reg(reg) => Instr::IDivReg(reg).emit(out)?,
+                            Val::Instant(i) => {
+                                Instr::MovToReg(RCX, val).emit(out)?;
+                                Instr::IDivReg(RCX).emit(out)?;
+                            }
+                            Val::Mem(mem) => Instr::IDivMem(mem).emit(out)?,
+                        }
                         // mov remainder from RDX to RAX:
                         Instr::MovToReg(RAX, Val::Reg(RDX)).emit(out)?;
                     }
@@ -802,6 +820,16 @@ impl Quadruple {
                             .emit(out)?;
                     }
                     CallingConvention::Cdecl => {
+                        // sanity alignment check
+                        // before call, the stack must be aligned to 8 mod 16
+                        Instr::MovToReg(RAX, Val::Reg(RSP)).emit(out)?;
+                        Instr::Cqo.emit(out)?;
+                        Instr::MovToReg(RCX, Val::Instant(Instant(16))).emit(out)?;
+                        Instr::IDivReg(RCX).emit(out)?;
+                        // mov remainder from RDX to RAX:
+                        Instr::Cmp(RDX, Val::Instant(Instant(8))).emit(out)?;
+                        Instr::Jnz(Label::Func(Ident::from("_notaligned"))).emit(out)?;
+
                         // place arguments in corresponding registers
                         for (arg, reg) in args.iter().copied().zip(params_registers()) {
                             Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
@@ -825,22 +853,27 @@ impl Quadruple {
     }
 }
 
-fn emit_start(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame) -> AsmGenResult {
-    writeln!(out, "global _start")?;
-    Label::Func(Ident::from("_start".to_string())).emit(out)?;
-
-    let stack_growth = main_frame.frame_size - RETADDR_SIZE;
-    if stack_growth != 0 {
-        state.advance_rsp(stack_growth as isize).emit(out)?;
+fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame) -> AsmGenResult {
+    for (func, _) in INITIAL_FUNCS.iter() {
+        writeln!(out, "extern {}", func)?;
     }
+    writeln!(out, "\nglobal main\n")?;
 
-    Instr::Call(Label::Func(Ident::from("main".to_string()))).emit(out)?;
+    // Label::Func(Ident::from("_start".to_string())).emit(out)?;
 
-    if stack_growth != 0 {
-        state.reset_rsp().emit(out)?;
-    }
+    // let stack_growth = main_frame.frame_size - RETADDR_SIZE;
+    // if stack_growth != 0 {
+    //     state.advance_rsp(stack_growth as isize).emit(out)?;
+    // }
 
-    Instr::MovToReg(RDI, Val::Reg(RAX)).emit(out)?;
+    // Instr::Call(Label::Func(Ident::from("main".to_string()))).emit(out)?;
+
+    // if stack_growth != 0 {
+    //     state.reset_rsp().emit(out)?;
+    // }
+
+    Label::Func(Ident::from("_notaligned")).emit(out)?;
+    Instr::MovToReg(RDI, Val::Instant(Instant(66))).emit(out)?;
     Instr::MovToReg(RAX, Val::Instant(SYS_EXIT)).emit(out)?;
     Instr::Syscall.emit(out)?;
 
