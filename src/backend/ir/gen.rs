@@ -399,6 +399,12 @@ impl Block {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ConditionalContext {
+    block_true: BasicBlockIdx,
+    block_false: BasicBlockIdx,
+}
+
 impl Stmt {
     fn ends_current_block(&self) -> bool {
         match &self.1 {
@@ -426,7 +432,7 @@ impl Stmt {
                 for decl in decls.decls.iter() {
                     let var = state.declare_var(decl.name.clone(), decls.type_.clone().into());
                     if let Some(init) = decl.init.as_ref() {
-                        let reg = init.ir(cfg, state);
+                        let reg = init.ir(cfg, state, None);
                         match reg {
                             Value::Instant(i) => {
                                 cfg.current_mut().quadruples.push(Quadruple::Set(var, i))
@@ -444,7 +450,7 @@ impl Stmt {
                 }
             }
             StmtInner::Ass(lval, rval) => {
-                let rval = rval.ir(cfg, state);
+                let rval = rval.ir(cfg, state, None);
                 let lval = lval.ir(cfg, state);
                 let quadruple = match rval {
                     Value::Instant(i) => Quadruple::Set(lval, i),
@@ -469,7 +475,7 @@ impl Stmt {
                 ));
             }
             StmtInner::Return(expr) => {
-                let reg = expr.ir(cfg, state);
+                let reg = expr.ir(cfg, state, None);
                 cfg.current_mut().end_type = Some(EndType::Return(Some(reg)));
                 let bl = cfg.new_block();
                 cfg.make_current(bl);
@@ -481,7 +487,14 @@ impl Stmt {
             }
 
             StmtInner::Cond(cond, then) => {
-                let res = cond.ir(cfg, state);
+                let res = cond.ir(
+                    cfg,
+                    state,
+                    Some(ConditionalContext {
+                        block_true: todo!(),
+                        block_false: todo!(),
+                    }),
+                );
                 match res {
                     Value::Instant(i) => {
                         if *i == 0 {
@@ -510,7 +523,14 @@ impl Stmt {
                 }
             }
             StmtInner::CondElse(cond, then, else_br) => {
-                let res = cond.ir(cfg, state);
+                let res = cond.ir(
+                    cfg,
+                    state,
+                    Some(ConditionalContext {
+                        block_true: todo!(),
+                        block_false: todo!(),
+                    }),
+                );
                 match res {
                     Value::Instant(i) => {
                         if *i == 0 {
@@ -547,7 +567,7 @@ impl Stmt {
             }
 
             StmtInner::SExp(expr) => {
-                let _ = expr.ir(cfg, state);
+                let _ = expr.ir(cfg, state, None);
             }
 
             StmtInner::While(cond, body) => {
@@ -555,7 +575,14 @@ impl Stmt {
                 let cond_block = cfg.new_block();
                 cfg.make_current(cond_block);
 
-                let res = cond.ir(cfg, state);
+                let res = cond.ir(
+                    cfg,
+                    state,
+                    Some(ConditionalContext {
+                        block_true: todo!(),
+                        block_false: todo!(),
+                    }),
+                );
                 match res {
                     Value::Instant(i) => {
                         if *i == 0 {
@@ -593,6 +620,7 @@ impl Stmt {
 }
 
 // FIXME: make Instants typed, which would allow for string instants!
+// Update: string instants impossible anyway.
 
 impl Expr {
     fn ends_current_block(&self) -> bool {
@@ -611,11 +639,11 @@ impl Expr {
         }
     }
 
-    fn ir(&self, cfg: &mut CFG, state: &mut State) -> Value {
+    fn ir(&self, cfg: &mut CFG, state: &mut State, cond_ctx: Option<ConditionalContext>) -> Value {
         match &self.1 {
             ExprInner::Op(op) => match op {
                 Op::UnOp(un_op, a) => match un_op {
-                    ast::UnOpType::Neg => match a.ir(cfg, state) {
+                    ast::UnOpType::Neg => match a.ir(cfg, state, cond_ctx) {
                         Value::Instant(i) => Value::Instant(Instant(-*i)),
                         val @ Value::Variable(var) => {
                             let typ = state.get_var_type(var).unwrap();
@@ -628,7 +656,7 @@ impl Expr {
                             Value::Variable(tmp)
                         }
                     },
-                    ast::UnOpType::Not => match a.ir(cfg, state) {
+                    ast::UnOpType::Not => match a.ir(cfg, state, cond_ctx) {
                         Value::Instant(i) => Value::Instant(i.not()),
                         val @ Value::Variable(var) => {
                             let typ = state.get_var_type(var).unwrap();
@@ -643,8 +671,8 @@ impl Expr {
                     },
                 },
                 Op::BinOp(bin_op, a, b) => {
-                    let a_val = a.ir(cfg, state);
-                    let b_val = b.ir(cfg, state);
+                    let a_val = a.ir(cfg, state, cond_ctx);
+                    let b_val = b.ir(cfg, state, cond_ctx);
 
                     if let (Value::Instant(a_i), Value::Instant(b_i)) = (a_val, b_val) {
                         // TODO: optimise
@@ -762,13 +790,15 @@ impl Expr {
                     }
                 }
                 Op::LogOp(log_op, a, b) => {
-                    let a_res = a.ir(cfg, state);
+                    let a_res = a.ir(cfg, state, cond_ctx);
                     match (a_res, log_op) {
                         (Value::Instant(i), LogOpType::And) if *i == 0 => {
                             Value::Instant(Instant::bool(false))
                         }
-                        (Value::Instant(i), LogOpType::And) if *i != 0 => b.ir(cfg, state),
-                        (Value::Instant(i), LogOpType::Or) if *i == 0 => b.ir(cfg, state),
+                        (Value::Instant(i), LogOpType::And) if *i != 0 => {
+                            b.ir(cfg, state, cond_ctx)
+                        }
+                        (Value::Instant(i), LogOpType::Or) if *i == 0 => b.ir(cfg, state, cond_ctx),
                         (Value::Instant(i), LogOpType::Or) if *i != 0 => {
                             Value::Instant(Instant::bool(true))
                         }
@@ -778,7 +808,7 @@ impl Expr {
                             let check_b_block_idx = cfg.new_block();
                             cfg.make_current(check_b_block_idx);
 
-                            let b_res = b.ir(cfg, state);
+                            let b_res = b.ir(cfg, state, cond_ctx);
                             cfg.make_current(pre_block_idx);
 
                             match (b_res, log_op) {
@@ -884,7 +914,7 @@ impl LVal {
         match &self.1 {
             LValInner::Id(var_id) => state.retrieve_var(var_id),
             LValInner::FunCall { name, args } => {
-                let args = args.iter().map(|arg| arg.ir(cfg, state)).collect();
+                let args = args.iter().map(|arg| arg.ir(cfg, state, None)).collect();
                 let retvar = state.fresh_reg(typ.unwrap_or(VarType::INT));
                 cfg.current_mut().quadruples.push(Quadruple::Call(
                     retvar,
