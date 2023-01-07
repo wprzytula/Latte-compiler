@@ -1,7 +1,7 @@
 mod gen;
 mod opts;
 
-pub(crate) use gen::CONCAT_STRINGS_FUNC;
+pub(crate) use gen::{CONCAT_STRINGS_FUNC, REAL_MAIN};
 
 use std::{
     collections::{HashMap, HashSet},

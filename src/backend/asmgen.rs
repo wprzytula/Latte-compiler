@@ -6,7 +6,10 @@ use std::{
 
 use vector_map::VecMap;
 
-use crate::frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS};
+use crate::{
+    backend::ir::REAL_MAIN,
+    frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS},
+};
 
 use super::ir::{
     self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, EndType, Instant, Ir,
@@ -22,7 +25,6 @@ fn params_registers() -> impl Iterator<Item = Reg> {
 }
 
 const SYS_EXIT: Instant = Instant(60);
-const REAL_MAIN: &str = "__real_main";
 
 type AsmGenResult = io::Result<()>;
 
@@ -366,6 +368,7 @@ impl Instr {
 
 #[derive(Debug)]
 struct Frame {
+    name: Ident,
     convention: CallingConvention,
     params: Vec<ir::Var>,
     local_variables_count: usize,
@@ -374,7 +377,7 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(_stack_parameters_count: usize, variables: HashSet<ir::Var>) -> Self {
+    fn new(name: Ident, _stack_parameters_count: usize, variables: HashSet<ir::Var>) -> Self {
         eprintln!("Creating frame with variables: {:?}", variables);
         let variables_mapping = variables
             .into_iter()
@@ -384,6 +387,7 @@ impl Frame {
         eprintln!("Variables got mappings: {:?}", &variables_mapping);
 
         Self {
+            name,
             convention: CallingConvention::StackVars,
             local_variables_count: variables_mapping.len(),
             frame_size: ((variables_mapping.len() + 1/*retaddr*/) * QUADWORD_SIZE + QUADWORD_SIZE)
@@ -394,8 +398,9 @@ impl Frame {
         }
     }
 
-    fn new_cdecl(params: Vec<ir::Var>) -> Self {
+    fn new_cdecl(name: Ident, params: Vec<ir::Var>) -> Self {
         Self {
+            name,
             convention: CallingConvention::Cdecl,
             local_variables_count: 0,
             variables_mapping: VecMap::new(),
@@ -408,7 +413,7 @@ impl Frame {
         let res = self
             .variables_mapping
             .get(&variable)
-            .unwrap_or_else(|| panic!("{:?} not registered in frame.", variable))
+            .unwrap_or_else(|| panic!("{:?} not registered in frame: {:#?}.", variable, self))
             .0;
         // eprintln!("Queried {:?} frame offset, got {}.", variable, res);
         res
@@ -495,6 +500,7 @@ impl CFG {
                                 let mut variables = self.variables_in_function(func);
                                 variables.extend(params);
                                 Frame::new(
+                                    func.clone(),
                                     isize::max(
                                         params.len() as isize - ARGS_IN_REGISTERS as isize,
                                         0,
@@ -502,7 +508,9 @@ impl CFG {
                                     variables,
                                 )
                             }
-                            CallingConvention::Cdecl => Frame::new_cdecl(params.clone()),
+                            CallingConvention::Cdecl => {
+                                Frame::new_cdecl(func.clone(), params.clone())
+                            }
                         },
                     )
                 },

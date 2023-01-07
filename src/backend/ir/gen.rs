@@ -9,6 +9,7 @@ fn mangle_method(name: &Ident, class: &Ident) -> Ident {
 }
 
 pub(crate) const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
+pub(crate) const REAL_MAIN: &str = "__real_main";
 
 impl CFG {
     /** Built-in functions:
@@ -56,7 +57,7 @@ impl CFG {
 
     fn new_function(&mut self, mut id: Ident, fun_type: FunType, param_vars: Vec<Var>) {
         if id == "main" {
-            id = "real_main".into();
+            id = REAL_MAIN.into();
         }
         self.current_func = id.clone();
         let entry = self.new_block();
@@ -134,7 +135,7 @@ impl CFG {
             .collect::<Vec<_>>();
         let mut visited = vec![];
         for entry in entries {
-            eprintln!("\nIn linking succ and pred, so far visited: {:?}", visited);
+            // eprintln!("\nIn linking succ and pred, so far visited: {:?}", visited);
             visited.clear();
             self.dfs_linking(entry, &mut visited);
         }
