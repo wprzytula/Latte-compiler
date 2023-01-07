@@ -1,3 +1,5 @@
+use enum_as_inner::EnumAsInner;
+
 use std::iter;
 
 pub(super) use self::state::State;
@@ -405,6 +407,32 @@ struct ConditionalContext {
     block_false: BasicBlockIdx,
 }
 
+#[derive(Debug, EnumAsInner)]
+pub enum ValueFut<'a> {
+    Instant(Instant),
+    VariableFut(&'a Expr),
+}
+impl<'a> ValueFut<'a> {
+    fn ir(
+        &'a self,
+        cfg: &mut CFG,
+        state: &mut State,
+        cond_ctx: Option<ConditionalContext>,
+    ) -> Value {
+        match self {
+            ValueFut::Instant(i) => Value::Instant(*i),
+            ValueFut::VariableFut(fut) => {
+                let val = fut.ir(cfg, state, cond_ctx);
+                match val {
+                    Value::Instant(_) => unreachable!("Instants should have been returned earlier"),
+                    Value::Variable(_) => (),
+                };
+                val
+            }
+        }
+    }
+}
+
 impl Stmt {
     fn ir(&self, cfg: &mut CFG, state: &mut State) {
         match &self.1 {
@@ -605,6 +633,57 @@ impl Stmt {
 // Update: string instants impossible anyway.
 
 impl Expr {
+    fn ir_fut(&self) -> ValueFut {
+        match match &self.1 {
+            ExprInner::Id(_) => None,
+            ExprInner::IntLit(i) => Some(Instant(*i)),
+            ExprInner::BoolLit(b) => Some(Instant::bool(*b)),
+            ExprInner::StringLit(_) => None,
+            ExprInner::Op(op) => match op {
+                Op::UnOp(op, exp) => exp.ir_fut().as_instant().copied().map(|i| match op {
+                    ast::UnOpType::Neg => Instant(-i.0),
+                    ast::UnOpType::Not => i.not(),
+                }),
+                Op::BinOp(op, exp1, exp2) => exp1.ir_fut().as_instant().copied().and_then(|i1| {
+                    exp2.ir_fut().as_instant().copied().and_then(|i2| {
+                        Some(match op {
+                            ast::BinOpType::IntOp(op) => match op {
+                                IntOpType::IntRet(op) => Instant(match op {
+                                    IntRetType::Mul => i1.0 * i2.0,
+                                    IntRetType::Div => i1.0 / i2.0,
+                                    IntRetType::Mod => i1.0 % i2.0,
+                                    IntRetType::Sub => i1.0 - i2.0,
+                                }),
+                                IntOpType::BoolRet(op) => Instant::bool(match op {
+                                    BoolRetType::Gt => i1.0 > i2.0,
+                                    BoolRetType::Ge => i1.0 >= i2.0,
+                                    BoolRetType::Lt => i1.0 < i2.0,
+                                    BoolRetType::Le => i1.0 <= i2.0,
+                                }),
+                            },
+                            ast::BinOpType::Add => Instant(i1.0 + i2.0),
+                            ast::BinOpType::Eq => Instant::bool(i1 == i2),
+                            ast::BinOpType::NEq => Instant::bool(i1 != i2),
+                        })
+                    })
+                }),
+                Op::LogOp(op, exp1, exp2) => exp1.ir_fut().as_instant().copied().and_then(|i1| {
+                    exp2.ir_fut().as_instant().copied().and_then(|i2| {
+                        Some(Instant::bool(match op {
+                            LogOpType::And => i1.0 != 0 && i2.0 != 0,
+                            LogOpType::Or => i1.0 != 0 || i2.0 != 0,
+                        }))
+                    })
+                }),
+            },
+            ExprInner::LVal(_) => None,
+            ExprInner::Null(_) => None,
+        } {
+            Some(i) => ValueFut::Instant(i),
+            None => ValueFut::VariableFut(self),
+        }
+    }
+
     fn ir(&self, cfg: &mut CFG, state: &mut State, cond_ctx: Option<ConditionalContext>) -> Value {
         match &self.1 {
             ExprInner::Op(op) => match op {
