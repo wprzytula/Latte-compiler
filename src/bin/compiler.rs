@@ -15,7 +15,6 @@ use thiserror::Error;
 const RUNTIME_PATH: &str = "lib/runtime.o";
 
 pub fn execute(exe: &str, args: &[&str]) -> io::Result<ExitStatus> {
-    println!("Args: {}", args.join(", "));
     Command::new(exe).args(args).spawn()?.wait()
 }
 

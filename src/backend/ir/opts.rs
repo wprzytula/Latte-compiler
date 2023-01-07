@@ -23,6 +23,7 @@ impl Quadruple {
             }
             Quadruple::UnOp(_, _, val) => rename_val(val, prev, current),
             Quadruple::Copy(_, var) => rename_var(var, prev, current),
+            Quadruple::GetStrLit(_, _) => (),
             Quadruple::Set(_, _) => (),
             Quadruple::Call(_, _, vals) => {
                 for val in vals {
@@ -43,6 +44,7 @@ impl Quadruple {
             | Quadruple::UnOp(ass, _, _)
             | Quadruple::Copy(ass, _)
             | Quadruple::Set(ass, _)
+            | Quadruple::GetStrLit(ass, _)
             | Quadruple::Call(ass, _, _) => *ass == var,
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
@@ -60,6 +62,7 @@ impl Quadruple {
             | Quadruple::UnOp(ass, _, _)
             | Quadruple::Copy(ass, _)
             | Quadruple::Set(ass, _)
+            | Quadruple::GetStrLit(ass, _)
             | Quadruple::Call(ass, _, _) => *ass = current,
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),

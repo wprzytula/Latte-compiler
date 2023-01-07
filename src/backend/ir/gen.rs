@@ -1,3 +1,5 @@
+use std::iter;
+
 pub(super) use self::state::State;
 
 use super::*;
@@ -5,6 +7,8 @@ use super::*;
 fn mangle_method(name: &Ident, class: &Ident) -> Ident {
     Ident::from(format!("{}${}", name, class))
 }
+
+const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
 
 impl CFG {
     /** Built-in functions:
@@ -18,10 +22,17 @@ impl CFG {
         let built_in_functions = INITIAL_FUNCS
             .iter()
             .cloned()
+            .chain(iter::once((
+                "__concat_strings".to_string(),
+                FunType {
+                    ret_type: DataType::Nonvoid(NonvoidType::TString),
+                    params: vec![NonvoidType::TString, NonvoidType::TString],
+                },
+            )))
             .map(|(name, fun_type)| {
                 (
                     name,
-                    CfgFunction {
+                    IrFunction {
                         convention: CallingConvention::Cdecl,
                         entry: BasicBlockIdx(0),
                         params: fun_type
@@ -50,7 +61,7 @@ impl CFG {
         self.functions
             .insert(
                 id,
-                CfgFunction {
+                IrFunction {
                     convention: CallingConvention::StackVars,
                     entry,
                     typ: fun_type,
@@ -174,6 +185,7 @@ impl BasicBlock {
                 | Quadruple::UnOp(var, _, _)
                 | Quadruple::Copy(var, _)
                 | Quadruple::Set(var, _)
+                | Quadruple::GetStrLit(var, _)
                 | Quadruple::Call(var, _, _) => Some(*var),
                 Quadruple::ArrLoad(_, _, _) => todo!(),
                 Quadruple::ArrStore(_, _, _) => todo!(),
@@ -206,9 +218,10 @@ impl BasicBlock {
                     vars.insert(*var1);
                     vars.insert(*var2);
                 }
-                Quadruple::Set(var, _) => {
+                Quadruple::GetStrLit(var, _) | Quadruple::Set(var, _) => {
                     vars.insert(*var);
                 }
+
                 Quadruple::ArrLoad(_, _, _) => todo!(),
                 Quadruple::ArrStore(_, _, _) => todo!(),
                 Quadruple::DerefLoad(_, _) => todo!(),
@@ -234,7 +247,7 @@ mod state {
     use vector_map::VecMap;
 
     use crate::{
-        backend::ir::VarType,
+        backend::ir::{StringLiteral, VarType},
         frontend::semantic_analysis::ast::{Ident, NonvoidType},
     };
 
@@ -266,9 +279,9 @@ mod state {
 
     pub struct State {
         /* state-like flow */
-        string_literals: Vec<String>,
+        pub string_literals: Vec<String>,
         next_var_num: usize,
-        var_types: VecMap<Var, VarType>,
+        pub var_types: VecMap<Var, VarType>,
 
         /* env-like flow */
         var_location: Map<Ident, Var>,
@@ -313,15 +326,16 @@ mod state {
         ) -> Vec<Var> {
             self.var_location = Map::new();
             params
-                .map(|(param_name, param_type)| self.declare_var(param_name, param_type))
+                .map(|(param_name, param_type)| self.declare_var(param_name, param_type.into()))
                 .collect()
         }
 
-        pub(crate) fn declare_var(&mut self, id: Ident, typ: NonvoidType) -> Var {
+        pub(crate) fn declare_var(&mut self, id: Ident, typ: VarType) -> Var {
             // assert!(!self.var_location.contains_key(&id));
             let var = Var(self.next_var_num);
             self.next_var_num += 1;
             self.var_location.insert_mut(id, var);
+            self.var_types.insert(var, typ);
             var
         }
 
@@ -332,15 +346,15 @@ mod state {
                 .unwrap_or_else(|| panic!("No var {} declared.", id))
         }
 
-        pub(crate) fn register_literal(&mut self, string: String) -> usize {
+        pub(crate) fn register_literal(&mut self, string: String) -> StringLiteral {
             self.string_literals.push(string);
-            self.string_literals.len() - 1
+            StringLiteral(self.string_literals.len() - 1)
         }
     }
 }
 
 impl Program {
-    pub fn ir(&self) -> CFG {
+    pub fn ir(&self) -> Ir {
         let mut state = State::new();
         let mut cfg = CFG::new(&mut state);
 
@@ -358,7 +372,10 @@ impl Program {
         // eprintln!("BEFORE SSA: max var = {}", state.fresh_reg(None).0);
         // cfg.make_ssa(&mut state);
         // cfg.optimise_ssa();
-        cfg
+        Ir {
+            cfg,
+            string_literals: state.string_literals,
+        }
     }
 }
 
@@ -395,7 +412,7 @@ impl Stmt {
             StmtInner::Block(block) => block.ir(cfg, &mut state.new_scope()),
             StmtInner::VarDecl(decls) => {
                 for decl in decls.decls.iter() {
-                    let var = state.declare_var(decl.name.clone(), decls.type_.clone());
+                    let var = state.declare_var(decl.name.clone(), decls.type_.clone().into());
                     if let Some(init) = decl.init.as_ref() {
                         let reg = init.ir(cfg, state);
                         match reg {
@@ -557,6 +574,8 @@ impl Stmt {
     }
 }
 
+// FIXME: make Instants typed, which would allow for string instants!
+
 impl Expr {
     fn ends_current_block(&self) -> bool {
         match &self.1 {
@@ -568,7 +587,7 @@ impl Expr {
             ExprInner::Op(op) => match op {
                 Op::UnOp(_, opnd) => opnd.ends_current_block(),
                 Op::BinOp(_, a, b) => a.ends_current_block() || b.ends_current_block(),
-                Op::LogOp(log_op, _, _) => true,
+                Op::LogOp(_log_op, _, _) => true,
             },
             ExprInner::LVal(lval) => lval.ends_current_block(),
         }
@@ -654,7 +673,7 @@ impl Expr {
                         }
                         Value::Variable(var) => var,
                     };
-                    let tmp = state.fresh_reg(typ);
+                    let tmp = state.fresh_reg(typ.clone());
                     match bin_op {
                         ast::BinOpType::IntOp(op) => match op {
                             IntOpType::IntRet(op) => {
@@ -700,8 +719,20 @@ impl Expr {
                             ));
                             Value::Variable(tmp)
                         }
+                        ast::BinOpType::Add if matches!(typ, VarType::Ptr(PtrVarType::String)) => {
+                            let b_var = match b_val {
+                                Value::Instant(_) => unreachable!("Strings must not be instants"),
+                                Value::Variable(var) => var,
+                            };
+
+                            cfg.current_mut().quadruples.push(Quadruple::Call(
+                                tmp,
+                                CONCAT_STRINGS_FUNC.to_string(),
+                                vec![Value::Variable(a_var), Value::Variable(b_var)],
+                            ));
+                            Value::Variable(tmp)
+                        }
                         ast::BinOpType::Add => {
-                            // TODO: string addition
                             cfg.current_mut().quadruples.push(Quadruple::BinOp(
                                 tmp,
                                 a_var,
@@ -805,10 +836,16 @@ impl Expr {
                 let lit = state.register_literal(s.clone());
                 cfg.current_mut()
                     .quadruples
-                    .push(Quadruple::Set(reg, Instant(lit as i64)));
+                    .push(Quadruple::GetStrLit(reg, lit));
                 Value::Variable(reg)
             }
-            ExprInner::Null(typ) => Value::Instant(Instant(0)),
+            ExprInner::Null(typ) => {
+                let reg = state.fresh_reg(typ.clone().into());
+                cfg.current_mut()
+                    .quadruples
+                    .push(Quadruple::Set(reg, Instant(0)));
+                Value::Variable(reg)
+            }
             ExprInner::LVal(lval) => Value::Variable(lval.ir(cfg, state)),
         }
     }

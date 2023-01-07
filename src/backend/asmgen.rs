@@ -9,8 +9,8 @@ use vector_map::VecMap;
 use crate::frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS};
 
 use super::ir::{
-    self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, CfgFunction, EndType, Instant,
-    Quadruple, RelOpType, UnOpType, CFG,
+    self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, EndType, Instant, Ir,
+    IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG,
 };
 
 const ARGS_IN_REGISTERS: usize = 6;
@@ -193,12 +193,14 @@ pub struct Var(isize);
 pub enum Label {
     Num(usize),
     Func(Ident),
+    Str(StringLiteral),
 }
 impl Display for Label {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Label::Num(n) => write!(f, "label_{}", n),
+            Label::Num(n) => write!(f, "__block_{}", n),
             Label::Func(id) => f.write_str(id),
+            Label::Str(n) => write!(f, "__string_{}", n.0),
         }
     }
 }
@@ -281,6 +283,7 @@ enum Instr {
     Setg,
     Setge,
 
+    LoadString(Reg, StringLiteral),
     MovToReg(Reg, Val),
     MovToMem(Mem, Reg),
 
@@ -360,6 +363,7 @@ impl Instr {
             Instr::Ret => writeln!(out, "ret"),
             Instr::Call(label) => writeln!(out, "call {}", label),
             Instr::Syscall => writeln!(out, "syscall"),
+            Instr::LoadString(reg, idx) => writeln!(out, "lea {}, [rel {}]", reg, Label::Str(*idx)),
         }
     }
 }
@@ -471,8 +475,22 @@ impl Frame {
     }
 }
 
-impl CFG {
+impl Ir {
     pub fn emit_assembly(&self, out: &mut impl Write) -> AsmGenResult {
+        self.cfg.emit_assembly(out, &self.string_literals)
+    }
+}
+
+impl CFG {
+    pub fn emit_assembly(
+        &self,
+        out: &mut impl Write,
+        string_literals: &Vec<String>,
+    ) -> AsmGenResult {
+        // writeln!(out, ".intel_syntax noprefix")?;
+        writeln!(out, "section .data")?;
+        emit_string_literals(out, string_literals)?;
+
         let mut state = AsmGenState::new();
 
         eprintln!("Building frames");
@@ -482,7 +500,7 @@ impl CFG {
             .map(
                 |(
                     func,
-                    CfgFunction {
+                    IrFunction {
                         params, convention, ..
                     },
                 )| {
@@ -505,6 +523,7 @@ impl CFG {
 
         eprintln!("Built frames: {:#?}\n\n", &frames);
 
+        writeln!(out, "section .text")?;
         emit_header(
             out,
             &mut state,
@@ -515,7 +534,7 @@ impl CFG {
 
         for (
             func,
-            CfgFunction {
+            IrFunction {
                 entry, convention, ..
             },
         ) in self.functions.iter()
@@ -712,7 +731,7 @@ impl Quadruple {
                         let val = frame.get_val(*op2, state.rsp_displacement);
                         match val {
                             Val::Reg(reg) => Instr::IDivReg(reg).emit(out)?,
-                            Val::Instant(i) => {
+                            Val::Instant(_) => {
                                 Instr::MovToReg(RCX, val).emit(out)?;
                                 Instr::IDivReg(RCX).emit(out)?;
                             }
@@ -724,7 +743,7 @@ impl Quadruple {
                         let val = frame.get_val(*op2, state.rsp_displacement);
                         match val {
                             Val::Reg(reg) => Instr::IDivReg(reg).emit(out)?,
-                            Val::Instant(i) => {
+                            Val::Instant(_) => {
                                 Instr::MovToReg(RCX, val).emit(out)?;
                                 Instr::IDivReg(RCX).emit(out)?;
                             }
@@ -791,6 +810,12 @@ impl Quadruple {
                 Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
             }
+            Quadruple::GetStrLit(dst, str_idx) => {
+                Instr::LoadString(RAX, *str_idx).emit(out)?;
+                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                    .emit(out)?;
+            }
+
             Quadruple::Call(dst, func, args) => {
                 let cfg_function = cfg.functions.get(func).unwrap();
                 let callee_params = &cfg_function.params;
@@ -869,6 +894,8 @@ fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame
     for (func, _) in INITIAL_FUNCS.iter() {
         writeln!(out, "extern {}", func)?;
     }
+    writeln!(out, "extern __concat_strings")?;
+
     writeln!(out, "\nglobal main\n")?;
 
     Label::Func(Ident::from("main".to_string())).emit(out)?;
@@ -891,5 +918,18 @@ fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame
     // Instr::MovToReg(RAX, Val::Instant(SYS_EXIT)).emit(out)?;
     // Instr::Syscall.emit(out)?;
 
+    Ok(())
+}
+
+fn emit_string_literals(out: &mut impl Write, string_literals: &Vec<String>) -> AsmGenResult {
+    for (idx, string_literal) in string_literals.iter().enumerate() {
+        Label::Str(StringLiteral(idx)).emit(out)?;
+        writeln!(
+            out,
+            "\tdq {}",
+            string_literal.len() - 2 /* quotes are included */
+        )?;
+        writeln!(out, "\tdb {}", string_literal)?;
+    }
     Ok(())
 }

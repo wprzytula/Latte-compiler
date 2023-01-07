@@ -88,8 +88,17 @@ pub enum VarType {
 impl VarType {
     const INT: VarType = VarType::Simple(SimpleVarType::Int);
     const BOOL: VarType = VarType::Simple(SimpleVarType::Bool);
+
+    /**
+     * Strings are represented as pointers to memory that is laid out as follows:
+     * [usize_b1, usize_b2, usize_b3, usize_b4, b1, b2, b3, ..., bn]
+     * where b1b2b3...bn is the string content and usize is equal to n.
+     * */
     const STRING: VarType = VarType::Ptr(PtrVarType::String);
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StringLiteral(pub usize);
 
 #[derive(Debug, Clone)]
 pub enum SimpleVarType {
@@ -123,8 +132,10 @@ pub enum Quadruple {
     BinOp(Var, Var, BinOpType, Value), // dst, op1, op, op2
     RelOp(Var, Var, RelOpType, Value), // dst, op1, op, op2
     UnOp(Var, UnOpType, Value),        // dst, op,
+
     Copy(Var, Var),
     Set(Var, Instant),
+    GetStrLit(Var, StringLiteral),
 
     Call(Var, Ident, Vec<Value>),
 
@@ -144,7 +155,13 @@ pub enum CallingConvention {
 }
 
 #[derive(Debug)]
-pub struct CfgFunction {
+pub struct Ir {
+    pub(crate) cfg: CFG,
+    pub(crate) string_literals: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct IrFunction {
     pub convention: CallingConvention,
     pub entry: BasicBlockIdx,
     pub typ: FunType,
@@ -155,7 +172,7 @@ pub struct CfgFunction {
 pub struct CFG {
     pub blocks: Vec<BasicBlock>,
     current_block_idx: BasicBlockIdx,
-    pub functions: HashMap<Ident, CfgFunction>,
+    pub functions: HashMap<Ident, IrFunction>,
 }
 
 impl Index<BasicBlockIdx> for CFG {
