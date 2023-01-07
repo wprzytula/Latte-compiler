@@ -8,7 +8,7 @@ fn mangle_method(name: &Ident, class: &Ident) -> Ident {
     Ident::from(format!("{}${}", name, class))
 }
 
-const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
+pub(crate) const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
 
 impl CFG {
     /** Built-in functions:
@@ -34,7 +34,7 @@ impl CFG {
                     name,
                     IrFunction {
                         convention: CallingConvention::Cdecl,
-                        entry: BasicBlockIdx(0),
+                        entry: None,
                         params: fun_type
                             .params
                             .iter()
@@ -49,6 +49,7 @@ impl CFG {
         Self {
             blocks: vec![],
             current_block_idx: BasicBlockIdx(usize::MAX),
+            current_func: Ident::new(),
             functions: built_in_functions,
         }
     }
@@ -57,13 +58,14 @@ impl CFG {
         if id == "main" {
             id = "real_main".into();
         }
+        self.current_func = id.clone();
         let entry = self.new_block();
         self.functions
             .insert(
                 id,
                 IrFunction {
                     convention: CallingConvention::StackVars,
-                    entry,
+                    entry: Some(entry),
                     typ: fun_type,
                     params: param_vars,
                 },
@@ -75,8 +77,12 @@ impl CFG {
     }
 
     fn new_block(&mut self) -> BasicBlockIdx {
-        self.blocks.push(BasicBlock::empty());
-        BasicBlockIdx(self.blocks.len() - 1)
+        let new_idx = BasicBlockIdx(self.blocks.len());
+        self.blocks.push(BasicBlock {
+            func: self.current_func.clone(),
+            ..BasicBlock::empty(new_idx)
+        });
+        new_idx
     }
 
     fn current_mut(&mut self) -> &mut BasicBlock {
@@ -88,8 +94,9 @@ impl CFG {
         self.current_block_idx = idx;
     }
 
+    /// Called only for function with our call conventions, i.e. emitted by the compiler.
     pub fn variables_in_function(&self, func_name: &Ident) -> HashSet<Var> {
-        let entry = self.functions.get(func_name).unwrap().entry;
+        let entry = self.functions.get(func_name).unwrap().entry.unwrap(); // see above.
         let mut variables = HashSet::new();
 
         fn dfs_variables(
@@ -123,9 +130,11 @@ impl CFG {
             .functions
             .values()
             .map(|cfg_func| cfg_func.entry)
+            .flatten()
             .collect::<Vec<_>>();
         let mut visited = vec![];
         for entry in entries {
+            eprintln!("\nIn linking succ and pred, so far visited: {:?}", visited);
             visited.clear();
             self.dfs_linking(entry, &mut visited);
         }
@@ -155,8 +164,10 @@ impl CFG {
 }
 
 impl BasicBlock {
-    pub fn empty() -> Self {
+    pub fn empty(idx: BasicBlockIdx) -> Self {
         Self {
+            func: Ident::new(),
+            idx,
             entry: false,
             quadruples: vec![],
             successors: vec![],
@@ -491,7 +502,9 @@ impl Stmt {
 
                         cfg[pre_block].end_type =
                             Some(EndType::IfElse(cond_var, then_block, next_block));
-                        cfg[then_block].end_type = Some(EndType::Goto(next_block));
+                        cfg[then_block]
+                            .end_type
+                            .get_or_insert(EndType::Goto(next_block));
                     }
                 }
             }
@@ -522,8 +535,12 @@ impl Stmt {
 
                         cfg[pre_block].end_type =
                             Some(EndType::IfElse(cond_var, then_block, else_block));
-                        cfg[then_block].end_type = Some(EndType::Goto(next_block));
-                        cfg[else_block].end_type = Some(EndType::Goto(next_block));
+                        cfg[then_block]
+                            .end_type
+                            .get_or_insert(EndType::Goto(next_block));
+                        cfg[else_block]
+                            .end_type
+                            .get_or_insert(EndType::Goto(next_block));
                     }
                 }
             }

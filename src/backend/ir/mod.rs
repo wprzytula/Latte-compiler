@@ -1,6 +1,8 @@
 mod gen;
 mod opts;
 
+pub(crate) use gen::CONCAT_STRINGS_FUNC;
+
 use std::{
     collections::{HashMap, HashSet},
     ops::{Deref, Index, IndexMut},
@@ -163,7 +165,7 @@ pub struct Ir {
 #[derive(Debug)]
 pub struct IrFunction {
     pub convention: CallingConvention,
-    pub entry: BasicBlockIdx,
+    pub entry: Option<BasicBlockIdx>,
     pub typ: FunType,
     pub params: Vec<Var>,
 }
@@ -172,6 +174,7 @@ pub struct IrFunction {
 pub struct CFG {
     pub blocks: Vec<BasicBlock>,
     current_block_idx: BasicBlockIdx,
+    current_func: Ident,
     pub functions: HashMap<Ident, IrFunction>,
 }
 
@@ -197,6 +200,8 @@ pub enum EndType {
 
 #[derive(Debug)]
 pub struct BasicBlock {
+    idx: BasicBlockIdx,
+    func: Ident,
     pub quadruples: Vec<Quadruple>,
     pub successors: Vec<BasicBlockIdx>,
     pub predecessors: Vec<BasicBlockIdx>,

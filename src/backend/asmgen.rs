@@ -10,7 +10,7 @@ use crate::frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS};
 
 use super::ir::{
     self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, EndType, Instant, Ir,
-    IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG,
+    IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC,
 };
 
 const ARGS_IN_REGISTERS: usize = 6;
@@ -22,6 +22,7 @@ fn params_registers() -> impl Iterator<Item = Reg> {
 }
 
 const SYS_EXIT: Instant = Instant(60);
+const REAL_MAIN: &str = "__real_main";
 
 type AsmGenResult = io::Result<()>;
 
@@ -210,19 +211,15 @@ impl Label {
     }
 }
 
-struct AsmGenState /* <'a> */ {
-    // vars: HashMap<&'a str, Var>,
-    // next_var_idx: usize,
+struct AsmGenState {
     block_labels: HashMap<BasicBlockIdx, Label>,
     next_label_idx: usize,
     rsp_displacement: isize, // where is ret addr relatively to current RSP
 }
 
-impl AsmGenState /* <'a> */ {
+impl AsmGenState {
     fn new() -> Self {
         Self {
-            // vars: HashMap::new(),
-            // next_var_idx: 0,
             block_labels: HashMap::new(),
             next_label_idx: 0,
             rsp_displacement: 0,
@@ -236,17 +233,6 @@ impl AsmGenState /* <'a> */ {
             l
         })
     }
-
-    /* fn declare_variable(&mut self, var: &'a str) {
-        if !self.vars.contains_key(var) {
-            self.vars.insert(var, Var(self.next_var_idx));
-            self.next_var_idx += 1;
-        }
-    }
-
-    fn get_var_idx(&self, var: &'a str) -> Var {
-        *self.vars.get(var).unwrap()
-    } */
 
     fn gen_label(&mut self) -> Label {
         let label = Label::Num(self.next_label_idx);
@@ -374,13 +360,12 @@ impl Instr {
  * upon call, the caller makes place for all callee's variables and calls (pushes retcode and jumps to the callee's label).
  * after call, the caller must clean up the callee's variables.
  *
- * frame_size: in bytes, including variables and return address (Constant, stored in Frame)
+ * frame_size: in bytes, including variables, return address and stack alignment padding (Constant, stored in Frame)
  * rsp_displacement: in bytes, signifies current rsp movement relative to current function's return address (Mutable, stored in State)
  */
 
 #[derive(Debug)]
 struct Frame {
-    // stack_parameters_count: usize,
     convention: CallingConvention,
     params: Vec<ir::Var>,
     local_variables_count: usize,
@@ -425,7 +410,7 @@ impl Frame {
             .get(&variable)
             .unwrap_or_else(|| panic!("{:?} not registered in frame.", variable))
             .0;
-        eprintln!("Queried {:?} frame offset, got {}.", variable, res);
+        // eprintln!("Queried {:?} frame offset, got {}.", variable, res);
         res
     }
 
@@ -439,7 +424,7 @@ impl Frame {
         // b <- frame - -8
         let res = self.get_variable_offset_relative_to_frame(variable) + self.frame_size as isize
             - RETADDR_SIZE as isize;
-        eprintln!("Queried {:?} retaddr offset, got {}.", variable, res);
+        // eprintln!("Queried {:?} retaddr offset, got {}.", variable, res);
         res
     }
 
@@ -449,10 +434,10 @@ impl Frame {
         rsp_displacement: isize,
     ) -> isize {
         let res = self.get_variable_offset_relative_to_retaddr(variable) + rsp_displacement;
-        eprintln!(
-            "Queried {:?} offset relative to rsp, got {}.",
-            variable, res
-        );
+        // eprintln!(
+        //     "Queried {:?} offset relative to rsp, got {}.",
+        //     variable, res
+        // );
         res
     }
 
@@ -487,7 +472,6 @@ impl CFG {
         out: &mut impl Write,
         string_literals: &Vec<String>,
     ) -> AsmGenResult {
-        // writeln!(out, ".intel_syntax noprefix")?;
         writeln!(out, "section .data")?;
         emit_string_literals(out, string_literals)?;
 
@@ -504,16 +488,20 @@ impl CFG {
                         params, convention, ..
                     },
                 )| {
-                    let mut variables = self.variables_in_function(func);
-                    variables.extend(params);
                     (
                         func.clone(),
                         match convention {
-                            CallingConvention::StackVars => Frame::new(
-                                isize::max(params.len() as isize - ARGS_IN_REGISTERS as isize, 0)
-                                    as usize,
-                                variables,
-                            ),
+                            CallingConvention::StackVars => {
+                                let mut variables = self.variables_in_function(func);
+                                variables.extend(params);
+                                Frame::new(
+                                    isize::max(
+                                        params.len() as isize - ARGS_IN_REGISTERS as isize,
+                                        0,
+                                    ) as usize,
+                                    variables,
+                                )
+                            }
                             CallingConvention::Cdecl => Frame::new_cdecl(params.clone()),
                         },
                     )
@@ -524,11 +512,7 @@ impl CFG {
         eprintln!("Built frames: {:#?}\n\n", &frames);
 
         writeln!(out, "section .text")?;
-        emit_header(
-            out,
-            &mut state,
-            frames.get(&"real_main".to_string()).unwrap(),
-        )?;
+        emit_header(out, &mut state, frames.get(&REAL_MAIN.to_string()).unwrap())?;
 
         let mut emitted = HashSet::new();
 
@@ -549,7 +533,7 @@ impl CFG {
 
                 self.emit_function_block(
                     out,
-                    *entry,
+                    entry.unwrap(),
                     &mut emitted,
                     &frames,
                     frames.get(func).unwrap(),
@@ -588,7 +572,6 @@ impl CFG {
 
         match &self[func_block].end_type {
             Some(EndType::Return(None)) | None => {
-                // state.reset_rsp().emit(out)?;
                 Instr::Ret.emit(out)?;
             }
             Some(EndType::Return(Some(val))) => {
@@ -600,7 +583,6 @@ impl CFG {
                     )
                     .emit(out)?,
                 }
-                // state.reset_rsp().emit(out)?;
                 Instr::Ret.emit(out)?;
             }
             Some(EndType::Goto(block_idx)) => {
@@ -779,8 +761,8 @@ impl Quadruple {
                     RelOpType::Ge => Instr::Setl.emit(out)?,
                     RelOpType::Lt => Instr::Setge.emit(out)?,
                     RelOpType::Le => Instr::Setg.emit(out)?,
-                    RelOpType::Eq => Instr::Sete.emit(out)?,
-                    RelOpType::NEq => Instr::Setne.emit(out)?,
+                    RelOpType::Eq => Instr::Setne.emit(out)?,
+                    RelOpType::NEq => Instr::Sete.emit(out)?,
                 }
                 Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RCX)
                     .emit(out)?;
@@ -894,7 +876,7 @@ fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame
     for (func, _) in INITIAL_FUNCS.iter() {
         writeln!(out, "extern {}", func)?;
     }
-    writeln!(out, "extern __concat_strings")?;
+    writeln!(out, "extern {}", CONCAT_STRINGS_FUNC)?;
 
     writeln!(out, "\nglobal main\n")?;
 
@@ -905,7 +887,7 @@ fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame
         state.advance_rsp(stack_growth as isize).emit(out)?;
     }
 
-    Instr::Call(Label::Func(Ident::from("real_main".to_string()))).emit(out)?;
+    Instr::Call(Label::Func(Ident::from(REAL_MAIN.to_string()))).emit(out)?;
 
     if stack_growth != 0 {
         state.reset_rsp().emit(out)?;
