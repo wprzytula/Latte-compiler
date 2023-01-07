@@ -356,6 +356,20 @@ impl Instr {
     }
 }
 
+impl RelOpType {
+    fn instrs(&self) -> (fn(Label) -> Instr, fn(Label) -> Instr) {
+        // (then, else)
+        match self {
+            RelOpType::Gt => (Instr::Jg, Instr::Jle),
+            RelOpType::Ge => (Instr::Jge, Instr::Jl),
+            RelOpType::Lt => (Instr::Jl, Instr::Jge),
+            RelOpType::Le => (Instr::Jle, Instr::Jg),
+            RelOpType::Eq => (Instr::Jz, Instr::Jnz),
+            RelOpType::NEq => (Instr::Jnz, Instr::Jz),
+        }
+    }
+}
+
 /**
  * Calling convention
  * base_var1 | ... | base_varn | base_retcode [base_frame end] | [child_frame begin] var1 | var2 | ... | varn | retcode [child_frame_end]
@@ -601,19 +615,32 @@ impl CFG {
                 }
                 self.emit_function_block(out, *block_idx, emitted, frames, frame, state, next_l)?;
             }
-            Some(EndType::IfElse(ir_var, then_block, else_block)) => {
+            Some(EndType::IfElse(_, _, _, then_block, else_block)) if then_block == else_block => {
+                let block_idx = then_block;
+                // Reduce to Goto
+                // If not emitted yet, simply emit it below and save a jump
+                if emitted.contains(block_idx) && next_l != Some(&state.get_block_label(*block_idx))
+                {
+                    Instr::Jmp(state.get_block_label(*block_idx).clone()).emit(out)?;
+                }
+                self.emit_function_block(out, *block_idx, emitted, frames, frame, state, next_l)?;
+            }
+            Some(EndType::IfElse(a, rel, b, then_block, else_block)) => {
                 let then_l = state.get_block_label(*then_block).clone();
                 let else_l = state.get_block_label(*else_block).clone();
 
                 // Cond
                 Instr::MovToReg(
                     RAX,
-                    Val::Mem(frame.get_variable_mem(*ir_var, state.rsp_displacement)),
+                    Val::Mem(frame.get_variable_mem(*a, state.rsp_displacement)),
                 )
                 .emit(out)?;
-                Instr::Test(RAX).emit(out)?;
+                Instr::Cmp(RAX, frame.get_val(*b, state.rsp_displacement)).emit(out)?;
+
+                let (then_instr, else_instr) = rel.instrs();
+
                 if next_l == Some(&then_l) {
-                    Instr::Jnz(else_l.clone()).emit(out)?;
+                    else_instr(else_l.clone()).emit(out)?;
                     // self.emit_function_block(out, *then_block, emitted, frames, frame, state, Some(&else_l))?;
 
                     // Else
@@ -627,7 +654,7 @@ impl CFG {
                         next_l,
                     )?;
                 } else if next_l == Some(&else_l) {
-                    Instr::Jz(then_l.clone()).emit(out)?;
+                    then_instr(then_l.clone()).emit(out)?;
                     // Else already emitted
                     // self.emit_function_block(out, *else_block, emitted, frames, frame, state, &then_l)?;
 
@@ -642,7 +669,7 @@ impl CFG {
                         next_l,
                     )?;
                 } else {
-                    Instr::Jnz(else_l.clone()).emit(out)?;
+                    else_instr(else_l.clone()).emit(out)?;
                     if emitted.contains(then_block) {
                         Instr::Jmp(then_l).emit(out)?;
                     }

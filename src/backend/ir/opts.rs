@@ -75,7 +75,10 @@ impl Quadruple {
 impl EndType {
     fn rename_usages(&mut self, prev: Var, current: Var) {
         match self {
-            EndType::IfElse(var, _, _) => rename_var(var, prev, current),
+            EndType::IfElse(var, _, val, _, _) => {
+                rename_var(var, prev, current);
+                rename_val(val, prev, current);
+            }
             EndType::Return(Some(val)) => rename_val(val, prev, current),
             EndType::Return(None) => (),
             EndType::Goto(_) => (),

@@ -8,6 +8,7 @@ use std::{
     ops::{Deref, Index, IndexMut},
 };
 
+use enum_as_inner::EnumAsInner;
 use vector_map::VecMap;
 
 use crate::frontend::semantic_analysis::{
@@ -15,7 +16,7 @@ use crate::frontend::semantic_analysis::{
     FunType, INITIAL_FUNCS,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, EnumAsInner)]
 pub enum Value {
     Instant(Instant),
     Variable(Var),
@@ -60,6 +61,17 @@ pub enum BinOpType {
     Or,
     Xor,
 }
+impl BinOpType {
+    pub fn is_commutative(&self) -> bool {
+        match self {
+            BinOpType::Add | BinOpType::Mul | BinOpType::And | BinOpType::Or | BinOpType::Xor => {
+                true
+            }
+
+            BinOpType::Sub | BinOpType::Div | BinOpType::Mod => false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum UnOpType {
@@ -77,6 +89,18 @@ pub enum RelOpType {
     Le,
     Eq,
     NEq,
+}
+impl RelOpType {
+    fn reversed_params(&self) -> Self {
+        match self {
+            RelOpType::Gt => RelOpType::Le,
+            RelOpType::Ge => RelOpType::Lt,
+            RelOpType::Lt => RelOpType::Ge,
+            RelOpType::Le => RelOpType::Gt,
+            RelOpType::Eq => RelOpType::Eq,
+            RelOpType::NEq => RelOpType::NEq,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -194,7 +218,7 @@ impl IndexMut<BasicBlockIdx> for CFG {
 #[derive(Debug)]
 pub enum EndType {
     Goto(BasicBlockIdx),
-    IfElse(Var, BasicBlockIdx, BasicBlockIdx),
+    IfElse(Var, RelOpType, Value, BasicBlockIdx, BasicBlockIdx),
     Return(Option<Value>),
 }
 
