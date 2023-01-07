@@ -406,24 +406,6 @@ struct ConditionalContext {
 }
 
 impl Stmt {
-    fn ends_current_block(&self) -> bool {
-        match &self.1 {
-            StmtInner::Empty
-            | StmtInner::Ass(_, _)
-            | StmtInner::VarDecl(_)
-            | StmtInner::Incr(_)
-            | StmtInner::Decr(_)
-            | StmtInner::SExp(_) => false,
-            StmtInner::Return(_)
-            | StmtInner::VoidReturn
-            | StmtInner::Cond(_, _)
-            | StmtInner::CondElse(_, _, _)
-            | StmtInner::While(_, _)
-            | StmtInner::For(_, _, _, _) => true,
-            StmtInner::Block(block) => block.1.iter().any(|stmt| stmt.ends_current_block()),
-        }
-    }
-
     fn ir(&self, cfg: &mut CFG, state: &mut State) {
         match &self.1 {
             StmtInner::Empty => (),
@@ -623,22 +605,6 @@ impl Stmt {
 // Update: string instants impossible anyway.
 
 impl Expr {
-    fn ends_current_block(&self) -> bool {
-        match &self.1 {
-            ExprInner::Id(_)
-            | ExprInner::IntLit(_)
-            | ExprInner::BoolLit(_)
-            | ExprInner::StringLit(_)
-            | ExprInner::Null(_) => false,
-            ExprInner::Op(op) => match op {
-                Op::UnOp(_, opnd) => opnd.ends_current_block(),
-                Op::BinOp(_, a, b) => a.ends_current_block() || b.ends_current_block(),
-                Op::LogOp(_log_op, _, _) => true,
-            },
-            ExprInner::LVal(lval) => lval.ends_current_block(),
-        }
-    }
-
     fn ir(&self, cfg: &mut CFG, state: &mut State, cond_ctx: Option<ConditionalContext>) -> Value {
         match &self.1 {
             ExprInner::Op(op) => match op {
@@ -900,11 +866,6 @@ impl Expr {
 }
 
 impl LVal {
-    #[inline(always)]
-    const fn ends_current_block(&self) -> bool {
-        false
-    }
-
     fn ir(&self, cfg: &mut CFG, state: &mut State) -> Var {
         let typ = if let DataType::Nonvoid(nonvoid) = self.2.borrow().as_ref().unwrap() {
             Some(nonvoid.clone().into())
