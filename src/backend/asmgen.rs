@@ -923,7 +923,11 @@ fn emit_string_literals(out: &mut impl Write, string_literals: &Vec<String>) -> 
             "\tdq {}",
             string_literal.len() - 2 /* quotes are included */
         )?;
-        writeln!(out, "\tdb {}", string_literal)?;
+        writeln!(
+            out,
+            "\tdb `{}`",
+            &string_literal[1..string_literal.len() - 1]
+        )?;
     }
     Ok(())
 }
