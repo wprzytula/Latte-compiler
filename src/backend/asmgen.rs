@@ -588,8 +588,10 @@ impl CFG {
             emitted.insert(func_block);
         }
 
-        eprintln!("Emitting block: {:?}", func_block);
-        state.get_block_label(func_block).emit(out)?;
+        let block_label = state.get_block_label(func_block);
+        block_label.emit(out)?;
+        eprintln!("Emitting ir block: {:?} as {}", func_block, block_label);
+
         self[func_block].emit(self, out, frames, frame, state)?;
 
         match &self[func_block].end_type {
@@ -639,35 +641,10 @@ impl CFG {
 
                 let (then_instr, else_instr) = rel.instrs();
 
-                if next_l == Some(&then_l) {
+                if next_l == Some(&then_l) && emitted.contains(else_block) {
                     else_instr(else_l.clone()).emit(out)?;
-                    // self.emit_function_block(out, *then_block, emitted, frames, frame, state, Some(&else_l))?;
-
-                    // Else
-                    self.emit_function_block(
-                        out,
-                        *else_block,
-                        emitted,
-                        frames,
-                        frame,
-                        state,
-                        next_l,
-                    )?;
-                } else if next_l == Some(&else_l) {
+                } else if next_l == Some(&else_l) && emitted.contains(then_block) {
                     then_instr(then_l.clone()).emit(out)?;
-                    // Else already emitted
-                    // self.emit_function_block(out, *else_block, emitted, frames, frame, state, &then_l)?;
-
-                    // Then
-                    self.emit_function_block(
-                        out,
-                        *then_block,
-                        emitted,
-                        frames,
-                        frame,
-                        state,
-                        next_l,
-                    )?;
                 } else {
                     else_instr(else_l.clone()).emit(out)?;
                     if emitted.contains(then_block) {

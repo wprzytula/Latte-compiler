@@ -86,26 +86,22 @@ fn lattests_compile_core() {
                     bin_path.display()
                 );
 
-                let bin_exec = Command::new(bin_path)
-                    .stderr(Stdio::inherit())
-                    .stdout(Stdio::piped())
-                    .spawn()
-                    .expect("Bin spawn error")
-                    .wait()
-                    .expect("Bin wait error");
-
-                let diff = Command::new("diff")
+                let mut diff = Command::new("diff")
                     .arg("-")
                     .arg(full_output_path)
                     .stdin(Stdio::piped())
-                    .stdout(Stdio::inherit())
-                    .stderr(Stdio::inherit())
                     .spawn()
-                    .expect("Diff spawn error")
-                    .wait()
-                    .expect("Diff wait error");
+                    .expect("Diff spawn error");
 
-                if !diff.success() {
+                let mut bin_exec = Command::new(bin_path)
+                    .stderr(Stdio::inherit())
+                    .stdout(diff.stdin.take().unwrap())
+                    .spawn()
+                    .expect("Bin spawn error");
+
+                bin_exec.wait().expect("Bin wait error");
+
+                if !diff.wait().map(|res| res.success()).unwrap_or(false) {
                     panic!("Output differs for test: {}", full_path.display());
                 }
             }

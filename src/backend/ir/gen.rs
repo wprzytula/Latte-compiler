@@ -1,12 +1,13 @@
 use either::Either;
 use enum_as_inner::EnumAsInner;
 
-use std::iter;
+use std::{fmt, iter};
 
 pub(super) use self::state::State;
 
 use super::*;
 
+#[allow(unused)]
 fn mangle_method(name: &Ident, class: &Ident) -> Ident {
     Ident::from(format!("{}${}", name, class))
 }
@@ -83,7 +84,7 @@ impl CFG {
     fn new_block(&mut self) -> BasicBlockIdx {
         let new_idx = BasicBlockIdx(self.blocks.len());
         self.blocks.push(BasicBlock {
-            func: self.current_func.clone(),
+            _func: self.current_func.clone(),
             ..BasicBlock::empty(new_idx)
         });
         new_idx
@@ -96,6 +97,7 @@ impl CFG {
 
     fn make_current(&mut self, idx: BasicBlockIdx) {
         self.current_block_idx = idx;
+        eprintln!("Made {} current block.", idx.0);
     }
 
     /// Called only for function with our call conventions, i.e. emitted by the compiler.
@@ -170,8 +172,8 @@ impl CFG {
 impl BasicBlock {
     pub fn empty(idx: BasicBlockIdx) -> Self {
         Self {
-            func: Ident::new(),
-            idx,
+            _func: Ident::new(),
+            _idx: idx,
             entry: false,
             quadruples: vec![],
             successors: vec![],
@@ -181,9 +183,9 @@ impl BasicBlock {
         }
     }
 
-    fn assert_sane(&self) {
-        assert!(self.quadruples.is_empty() || self.end_type.is_some())
-    }
+    // fn assert_sane(&self) {
+    //     assert!(self.quadruples.is_empty() || self.end_type.is_some())
+    // }
 
     pub fn is_empty(&self) -> bool {
         self.quadruples.is_empty()
@@ -380,6 +382,7 @@ impl Program {
                     .map(|param| (param.name.clone(), param.type_.clone())),
             );
             cfg.new_function(func.name.clone(), func.fun_type(), param_vars);
+            eprintln!("\nEmitting IR for function: {}", &func.name);
             func.block.ir(&mut cfg, &mut state);
         }
 
@@ -404,8 +407,10 @@ impl Block {
 
 #[derive(Debug, Clone, Copy)]
 struct ConditionalContext {
+    pre_block: BasicBlockIdx,
     block_true: BasicBlockIdx,
     block_false: BasicBlockIdx,
+    block_next: BasicBlockIdx,
 }
 
 #[derive(Debug, EnumAsInner)]
@@ -456,7 +461,7 @@ impl Stmt {
             }
             StmtInner::Ass(lval, rval) => {
                 let rval_fut = rval.ir_fut();
-                let lval = lval.ir(cfg, state);
+                let lval = lval.ir(cfg, state, None).unwrap();
                 let quadruple = match rval_fut {
                     ValueFut::Instant(i) => Quadruple::Set(lval, i),
                     ValueFut::VariableFut(rval) => {
@@ -467,7 +472,7 @@ impl Stmt {
                 cfg.current_mut().quadruples.push(quadruple);
             }
             StmtInner::Incr(lval) => {
-                let lval = lval.ir(cfg, state);
+                let lval = lval.ir(cfg, state, None).unwrap();
                 cfg.current_mut().quadruples.push(Quadruple::UnOp(
                     lval,
                     UnOpType::Inc,
@@ -475,7 +480,7 @@ impl Stmt {
                 ));
             }
             StmtInner::Decr(lval) => {
-                let lval = lval.ir(cfg, state);
+                let lval = lval.ir(cfg, state, None).unwrap();
                 cfg.current_mut().quadruples.push(Quadruple::UnOp(
                     lval,
                     UnOpType::Dec,
@@ -515,8 +520,10 @@ impl Stmt {
                             cfg,
                             state,
                             Some(ConditionalContext {
+                                pre_block,
                                 block_true: then_block,
                                 block_false: next_block,
+                                block_next: next_block,
                             }),
                         )
                         .ok_or(())
@@ -560,8 +567,10 @@ impl Stmt {
                             cfg,
                             state,
                             Some(ConditionalContext {
+                                pre_block,
                                 block_true: then_block,
                                 block_false: else_block,
+                                block_next: next_block,
                             }),
                         )
                         .ok_or(())
@@ -619,8 +628,10 @@ impl Stmt {
                             cfg,
                             state,
                             Some(ConditionalContext {
+                                pre_block: cond_block,
                                 block_true: loop_block,
                                 block_false: next_block,
+                                block_next: next_block,
                             }),
                         )
                         .ok_or(())
@@ -663,42 +674,83 @@ fn make_conditional_context(cfg: &mut CFG, state: &mut State) -> (ConditionalCon
         .push(Quadruple::Set(res, Instant::bool(false)));
     cfg[else_block].end_type = Some(EndType::Goto(next_block));
 
-    (
-        ConditionalContext {
-            block_true: else_block,
-            block_false: then_block,
-        },
-        res,
-    )
+    let ctx = ConditionalContext {
+        pre_block,
+        block_true: then_block,
+        block_false: else_block,
+        block_next: next_block,
+    };
+    eprintln!("Made cond ctx: {:#?}.", ctx);
+
+    (ctx, res)
 }
 
-fn ir_for_eq_or_not_eq(
+struct DebugExprInner<'a>(&'a ExprInner);
+impl<'a> fmt::Debug for DebugExprInner<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            ExprInner::Op(op) => match op {
+                Op::UnOp(op, _) => match op {
+                    ast::UnOpType::Neg => f.write_str("Neg"),
+                    ast::UnOpType::Not => f.write_str("Not"),
+                },
+                Op::BinOp(op, _, _) => match op {
+                    ast::BinOpType::IntOp(op) => match op {
+                        IntOpType::IntRet(op) => write!(f, "{:?}", op),
+                        IntOpType::BoolRet(op) => write!(f, "{:?}", op),
+                    },
+                    ast::BinOpType::Add => f.write_str("Add"),
+                    ast::BinOpType::Eq => f.write_str("Eq"),
+                    ast::BinOpType::NEq => f.write_str("NEq"),
+                },
+                Op::LogOp(op, _, _) => write!(f, "{:?}", op),
+            },
+            ExprInner::Id(_) => f.debug_struct("Id").finish_non_exhaustive(),
+            ExprInner::IntLit(_) => f.debug_struct("IntLit").finish_non_exhaustive(),
+            ExprInner::BoolLit(_) => f.debug_struct("BoolLit").finish_non_exhaustive(),
+            ExprInner::StringLit(_) => f.debug_struct("StringLit").finish_non_exhaustive(),
+            ExprInner::Null(_) => f.debug_struct("Null").finish_non_exhaustive(),
+            ExprInner::LVal(_) => f.debug_struct("LVal").finish_non_exhaustive(),
+        }
+    }
+}
+
+fn finish_cond_ctx_leaf(
     cfg: &mut CFG,
     state: &mut State,
-    a_var: Var,
-    b_val: Value,
-    eq: bool,
+    var: Var,
     cond_ctx: Option<ConditionalContext>,
+    from: &str,
 ) -> Option<Var> {
-    let (cond_ctx, res) = cond_ctx.map(|ctx| (ctx, None)).unwrap_or_else(|| {
-        let (ctx, res) = make_conditional_context(cfg, state);
-        (ctx, Some(res))
-    });
-    let op = if eq { RelOpType::Eq } else { RelOpType::NEq };
-
-    assert!(cfg.current_mut().end_type.is_none());
-    cfg.current_mut().end_type = Some(EndType::IfElse(
-        a_var,
-        op,
-        b_val,
-        cond_ctx.block_true,
-        cond_ctx.block_false,
-    ));
-
-    res
+    if let Some(cond_ctx) = cond_ctx {
+        assert!(matches!(
+            state.get_var_type(var).unwrap(),
+            VarType::Simple(SimpleVarType::Bool)
+        ));
+        cfg[cond_ctx.pre_block].end_type = Some(EndType::IfElse(
+            var,
+            RelOpType::NEq,
+            Value::Instant(Instant(0)),
+            cond_ctx.block_true,
+            cond_ctx.block_false,
+        ));
+        eprintln!(
+            "Because of {}, set {} end_type to IfElse(then: {}, else: {}).",
+            from, cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
+        );
+        None
+    } else {
+        Some(var)
+    }
 }
+
 impl Expr {
+    fn debug_surface<'a>(&'a self) -> DebugExprInner<'a> {
+        DebugExprInner(self)
+    }
+
     fn ir_fut(&self) -> ValueFut {
+        eprintln!("ir_fut of {:#?}", &self.debug_surface());
         match match &self.1 {
             ExprInner::Id(_) => None,
             ExprInner::IntLit(i) => Some(Instant(*i)),
@@ -765,7 +817,12 @@ impl Expr {
         state: &mut State,
         cond_ctx: Option<ConditionalContext>,
     ) -> Option<Var> {
-        match &self.1 {
+        eprintln!(
+            "ir of {:#?} with cond_ctx {:?}",
+            &self.debug_surface(),
+            cond_ctx
+        );
+        let res = match &self.1 {
             ExprInner::Op(op) => match op {
                 Op::UnOp(un_op, expr) => match un_op {
                     ast::UnOpType::Neg => {
@@ -792,11 +849,13 @@ impl Expr {
                             Some(ConditionalContext {
                                 block_true: cond_ctx.block_false,
                                 block_false: cond_ctx.block_true,
+                                ..cond_ctx
                             }),
                         );
                         res
                     }
                 },
+
                 Op::BinOp(bin_op, a, b) => {
                     let op = match bin_op {
                         ast::BinOpType::IntOp(op) => match op {
@@ -817,6 +876,7 @@ impl Expr {
                         ast::BinOpType::Eq => Either::Left(RelOpType::Eq),
                         ast::BinOpType::NEq => Either::Left(RelOpType::NEq),
                     };
+
                     match op {
                         Either::Left(rel_op) => {
                             let (cond_ctx, res) =
@@ -838,13 +898,17 @@ impl Expr {
                                 }
                             };
 
-                            cfg.current_mut().end_type = Some(EndType::IfElse(
+                            cfg[cond_ctx.pre_block].end_type = Some(EndType::IfElse(
                                 a_var,
                                 rel_op,
                                 b_val,
                                 cond_ctx.block_true,
                                 cond_ctx.block_false,
                             ));
+                            eprintln!(
+                                "Because of RelOp, set {} end_type to IfElse(then: {}, else: {}).",
+                                cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
+                            );
 
                             res
                         }
@@ -912,13 +976,14 @@ impl Expr {
                         }
                     }
                 }
+
                 Op::LogOp(op, a, b) => {
                     let (cond_ctx, res) = cond_ctx.map(|ctx| (ctx, None)).unwrap_or_else(|| {
                         let (ctx, res) = make_conditional_context(cfg, state);
                         (ctx, Some(res))
                     });
                     match (a.ir_fut(), b.ir_fut(), op) {
-                        (ValueFut::Instant(i1), ValueFut::Instant(i2), op) => {
+                        (ValueFut::Instant(_), ValueFut::Instant(_), _) => {
                             unreachable!("Instants impossible")
                         }
                         (ValueFut::Instant(i), ValueFut::VariableFut(_), LogOpType::And)
@@ -932,16 +997,17 @@ impl Expr {
                             unreachable!("Instants impossible")
                         }
                         // reduction to second operand
-                        (ValueFut::Instant(i), ValueFut::VariableFut(b), LogOpType::And)
-                        | (ValueFut::Instant(i), ValueFut::VariableFut(b), LogOpType::Or) => {
+                        (ValueFut::Instant(_), ValueFut::VariableFut(b), LogOpType::And)
+                        | (ValueFut::Instant(_), ValueFut::VariableFut(b), LogOpType::Or) => {
                             b.ir(cfg, state, Some(cond_ctx)).ok_or(()).unwrap_err();
                         }
 
                         (ValueFut::VariableFut(a), ValueFut::Instant(i), LogOpType::And) => {
-                            let cond_cxt = if i.0 == 0 {
+                            let cond_ctx = if i.0 == 0 {
                                 ConditionalContext {
                                     block_true: cond_ctx.block_false,
                                     block_false: cond_ctx.block_false,
+                                    ..cond_ctx
                                 }
                             } else {
                                 cond_ctx
@@ -949,10 +1015,11 @@ impl Expr {
                             a.ir(cfg, state, Some(cond_ctx)).ok_or(()).unwrap_err();
                         }
                         (ValueFut::VariableFut(a), ValueFut::Instant(i), LogOpType::Or) => {
-                            let cond_cxt = if i.0 != 0 {
+                            let cond_ctx = if i.0 != 0 {
                                 ConditionalContext {
                                     block_true: cond_ctx.block_true,
                                     block_false: cond_ctx.block_true,
+                                    ..cond_ctx
                                 }
                             } else {
                                 cond_ctx
@@ -960,7 +1027,6 @@ impl Expr {
                             a.ir(cfg, state, Some(cond_ctx)).ok_or(()).unwrap_err();
                         }
                         (ValueFut::VariableFut(a), ValueFut::VariableFut(b), _) => {
-                            let pre_block_idx = cfg.current_block_idx;
                             let check_b_block_idx = cfg.new_block();
 
                             cfg.make_current(check_b_block_idx);
@@ -968,13 +1034,20 @@ impl Expr {
                                 LogOpType::And => ConditionalContext {
                                     block_true: check_b_block_idx,
                                     block_false: cond_ctx.block_false,
+                                    ..cond_ctx
                                 },
                                 LogOpType::Or => ConditionalContext {
                                     block_true: cond_ctx.block_true,
                                     block_false: check_b_block_idx,
+                                    ..cond_ctx
                                 },
                             };
-                            let b_cond_ctx = cond_ctx;
+                            let b_cond_ctx = ConditionalContext {
+                                pre_block: check_b_block_idx,
+                                block_true: cond_ctx.block_true,
+                                block_false: cond_ctx.block_false,
+                                ..cond_ctx
+                            };
 
                             a.ir(cfg, state, Some(a_cond_ctx)).ok_or(()).unwrap_err();
 
@@ -983,81 +1056,18 @@ impl Expr {
                         }
                     };
                     res
-                    //     let a_fut = a.ir_fut();
-                    //     match (a_fut, log_op) {
-                    //         (Value::Variable(a_var), _) => {
-                    //             let pre_block_idx = cfg.current_block_idx;
-                    //             let check_b_block_idx = cfg.new_block();
-                    //             cfg.make_current(check_b_block_idx);
-
-                    //             let b_res = b.ir(cfg, state, cond_ctx);
-                    //             cfg.make_current(pre_block_idx);
-
-                    //                     cfg[then_block_idx].end_type =
-                    //                         Some(EndType::Goto(next_block_idx));
-                    //                     cfg[else_block_idx].end_type =
-                    //                         Some(EndType::Goto(next_block_idx));
-
-                    //                     let res_var = state.fresh_reg(VarType::BOOL);
-                    //                     match log_op {
-                    //                         LogOpType::And => {
-                    //                             cfg[pre_block_idx].end_type = Some(EndType::IfElse(
-                    //                                 a_var,
-                    //                                 check_b_block_idx,
-                    //                                 else_block_idx,
-                    //                             ));
-                    //                             cfg[check_b_block_idx].end_type =
-                    //                                 Some(EndType::IfElse(
-                    //                                     b_var,
-                    //                                     then_block_idx,
-                    //                                     else_block_idx,
-                    //                                 ));
-                    //                         }
-                    //                         LogOpType::Or => {
-                    //                             cfg[pre_block_idx].end_type = Some(EndType::IfElse(
-                    //                                 a_var,
-                    //                                 else_block_idx,
-                    //                                 check_b_block_idx,
-                    //                             ));
-                    //                             cfg[check_b_block_idx].end_type =
-                    //                                 Some(EndType::IfElse(
-                    //                                     b_var,
-                    //                                     else_block_idx,
-                    //                                     then_block_idx,
-                    //                                 ));
-                    //                         }
-                    //                     }
-
-                    //                     cfg.make_current(next_block_idx);
-                    //                     Value::Variable(res_var)
-                    //                 }
-                    //             }
-                    //         }
-                    //     }
-                    // }
                 }
             },
+
             ExprInner::Id(id) => {
                 let var = state.retrieve_var(id);
-                if let Some(cond_ctx) = cond_ctx {
-                    assert!(matches!(
-                        state.get_var_type(var).unwrap(),
-                        VarType::Simple(SimpleVarType::Bool)
-                    ));
-                    cfg.current_mut().end_type = Some(EndType::IfElse(
-                        var,
-                        RelOpType::NEq,
-                        Value::Instant(Instant(0)),
-                        cond_ctx.block_true,
-                        cond_ctx.block_false,
-                    ));
-                    None
-                } else {
-                    Some(var)
-                }
+                finish_cond_ctx_leaf(cfg, state, var, cond_ctx, "Expr Id")
             }
-            ExprInner::IntLit(n) => unreachable!("Impossible instants"),
-            ExprInner::BoolLit(b) => unreachable!("Impossible instants"),
+
+            ExprInner::IntLit(_) => unreachable!("Impossible instants"),
+
+            ExprInner::BoolLit(_) => unreachable!("Impossible instants"),
+
             ExprInner::StringLit(s) => {
                 let reg = state.fresh_reg(VarType::STRING);
                 let lit = state.register_literal(s.clone());
@@ -1066,6 +1076,7 @@ impl Expr {
                     .push(Quadruple::GetStrLit(reg, lit));
                 Some(reg)
             }
+
             ExprInner::Null(typ) => {
                 let reg = state.fresh_reg(typ.clone().into());
                 cfg.current_mut()
@@ -1073,20 +1084,33 @@ impl Expr {
                     .push(Quadruple::Set(reg, Instant(0)));
                 Some(reg)
             }
-            ExprInner::LVal(lval) => Some(lval.ir(cfg, state)),
+
+            ExprInner::LVal(lval) => lval.ir(cfg, state, cond_ctx),
+        };
+        if let Some(cond_ctx) = cond_ctx {
+            cfg.make_current(cond_ctx.block_next);
         }
+        res
     }
 }
 
 impl LVal {
-    fn ir(&self, cfg: &mut CFG, state: &mut State) -> Var {
+    fn ir(
+        &self,
+        cfg: &mut CFG,
+        state: &mut State,
+        cond_ctx: Option<ConditionalContext>,
+    ) -> Option<Var> {
         let typ = if let DataType::Nonvoid(nonvoid) = self.2.borrow().as_ref().unwrap() {
             Some(nonvoid.clone().into())
         } else {
             None
         };
         match &self.1 {
-            LValInner::Id(var_id) => state.retrieve_var(var_id),
+            LValInner::Id(var_id) => {
+                let var = state.retrieve_var(var_id);
+                finish_cond_ctx_leaf(cfg, state, var, cond_ctx, "LVal Id")
+            }
             LValInner::FunCall { name, args } => {
                 let args = args
                     .iter()
@@ -1102,15 +1126,16 @@ impl LVal {
                     },
                     args,
                 ));
-                retvar
+                finish_cond_ctx_leaf(cfg, state, retvar, cond_ctx, "FunCall Id")
             }
 
             LValInner::FieldAccess(_, _) => todo!(),
             LValInner::ArrSub(_, _) => todo!(),
             LValInner::MethodCall {
-                object,
-                method_name,
-                args,
+                ..
+                // object,
+                // method_name,
+                // args,
             } => todo!(),
             LValInner::New(_) => todo!(),
         }

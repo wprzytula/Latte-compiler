@@ -224,8 +224,8 @@ pub enum EndType {
 
 #[derive(Debug)]
 pub struct BasicBlock {
-    idx: BasicBlockIdx,
-    func: Ident,
+    _idx: BasicBlockIdx,
+    _func: Ident,
     pub quadruples: Vec<Quadruple>,
     pub successors: Vec<BasicBlockIdx>,
     pub predecessors: Vec<BasicBlockIdx>,
