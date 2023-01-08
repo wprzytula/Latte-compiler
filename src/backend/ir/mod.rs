@@ -223,9 +223,30 @@ pub enum EndType {
 }
 
 #[derive(Debug)]
+pub enum BasicBlockKind {
+    Other,
+    Initial,
+    AfterReturn,
+    WhileCond,
+    WhileBody,
+    WhileNext,
+    InfiniteLoop,
+    LogOpSecondCheck,
+    IfElseThen,
+    IfElseElse,
+    IfElseNext,
+    IfThen,
+    IfNext,
+    MadeCondCtxThen,
+    MadeCondCtxElse,
+    MadeCondCtxNext,
+}
+
+#[derive(Debug)]
 pub struct BasicBlock {
     _idx: BasicBlockIdx,
     _func: Ident,
+    _kind: BasicBlockKind,
     pub quadruples: Vec<Quadruple>,
     pub successors: Vec<BasicBlockIdx>,
     pub predecessors: Vec<BasicBlockIdx>,

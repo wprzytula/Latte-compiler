@@ -64,7 +64,7 @@ impl CFG {
             id = REAL_MAIN.into();
         }
         self.current_func = id.clone();
-        let entry = self.new_block();
+        let entry = self.new_block(BasicBlockKind::Initial);
         self.functions
             .insert(
                 id,
@@ -81,11 +81,11 @@ impl CFG {
         self.current_mut().entry = true;
     }
 
-    fn new_block(&mut self) -> BasicBlockIdx {
+    fn new_block(&mut self, kind: BasicBlockKind) -> BasicBlockIdx {
         let new_idx = BasicBlockIdx(self.blocks.len());
         self.blocks.push(BasicBlock {
             _func: self.current_func.clone(),
-            ..BasicBlock::empty(new_idx)
+            ..BasicBlock::empty(new_idx, kind)
         });
         new_idx
     }
@@ -170,10 +170,11 @@ impl CFG {
 }
 
 impl BasicBlock {
-    pub fn empty(idx: BasicBlockIdx) -> Self {
+    pub fn empty(idx: BasicBlockIdx, kind: BasicBlockKind) -> Self {
         Self {
             _func: Ident::new(),
             _idx: idx,
+            _kind: kind,
             entry: false,
             quadruples: vec![],
             successors: vec![],
@@ -189,6 +190,16 @@ impl BasicBlock {
 
     pub fn is_empty(&self) -> bool {
         self.quadruples.is_empty()
+    }
+
+    fn set_end_type(&mut self, new_end_type: EndType) {
+        if let Some(ref old_end_type) = self.end_type {
+            eprintln!(
+                "WARNING: replacing end_type for block {} (kind {:?}); it was {:?}, now {:?}",
+                self._idx.0, self._kind, old_end_type, new_end_type
+            )
+        }
+        self.end_type = Some(new_end_type);
     }
 
     fn defined_variables(&self, buf: &mut HashSet<Var>) {
@@ -493,13 +504,13 @@ impl Stmt {
                     "Because of Return, setting {} end_type to Return({:?})",
                     cfg.current_block_idx.0, reg
                 );
-                cfg.current_mut().end_type = Some(EndType::Return(Some(reg)));
-                let bl = cfg.new_block();
+                cfg.current_mut().set_end_type(EndType::Return(Some(reg)));
+                let bl = cfg.new_block(BasicBlockKind::AfterReturn);
                 cfg.make_current(bl, "Return");
             }
             StmtInner::VoidReturn => {
-                cfg.current_mut().end_type = Some(EndType::Return(None));
-                let bl = cfg.new_block();
+                cfg.current_mut().set_end_type(EndType::Return(None));
+                let bl = cfg.new_block(BasicBlockKind::AfterReturn);
                 cfg.make_current(bl, "Void return");
             }
 
@@ -517,8 +528,8 @@ impl Stmt {
                     }
                     ValueFut::VariableFut(cond) => {
                         let pre_block = cfg.current_block_idx;
-                        let then_block = cfg.new_block();
-                        let next_block = cfg.new_block();
+                        let then_block = cfg.new_block(BasicBlockKind::IfThen);
+                        let next_block = cfg.new_block(BasicBlockKind::IfNext);
 
                         cond.ir(
                             cfg,
@@ -562,9 +573,9 @@ impl Stmt {
                     }
                     ValueFut::VariableFut(cond) => {
                         let pre_block = cfg.current_block_idx;
-                        let then_block = cfg.new_block();
-                        let else_block = cfg.new_block();
-                        let next_block = cfg.new_block();
+                        let then_block = cfg.new_block(BasicBlockKind::IfElseThen);
+                        let else_block = cfg.new_block(BasicBlockKind::IfElseElse);
+                        let next_block = cfg.new_block(BasicBlockKind::IfElseNext);
 
                         cond.ir(
                             cfg,
@@ -614,17 +625,19 @@ impl Stmt {
                         } else {
                             // condition always true
                             // make infinite loop in a new block
-                            let loop_block = cfg.new_block();
-                            cfg[pre_block].end_type = Some(EndType::Goto(loop_block));
-                            cfg[loop_block].end_type = Some(EndType::Goto(loop_block));
+                            let loop_block = cfg.new_block(BasicBlockKind::InfiniteLoop);
+                            cfg[pre_block].set_end_type(EndType::Goto(loop_block));
+                            cfg[loop_block].set_end_type(EndType::Goto(loop_block));
                             cfg.make_current(loop_block, "While infinite loop");
                             body.ir(cfg, state);
                         }
                     }
                     ValueFut::VariableFut(cond) => {
-                        let cond_block = cfg.new_block();
-                        let loop_block = cfg.new_block();
-                        let next_block = cfg.new_block();
+                        let cond_block = cfg.new_block(BasicBlockKind::WhileCond);
+                        let loop_block = cfg.new_block(BasicBlockKind::WhileBody);
+                        let next_block = cfg.new_block(BasicBlockKind::WhileNext);
+
+                        cfg[pre_block].set_end_type(EndType::Goto(cond_block));
 
                         cfg.make_current(cond_block, "While cond");
                         cond.ir(
@@ -642,11 +655,9 @@ impl Stmt {
 
                         cfg.make_current(loop_block, "While body");
                         body.ir(cfg, state);
+                        cfg.current_mut().set_end_type(EndType::Goto(cond_block));
 
                         cfg.make_current(next_block, "While next");
-
-                        cfg[pre_block].end_type = Some(EndType::Goto(cond_block));
-                        cfg[loop_block].end_type = Some(EndType::Goto(cond_block));
                         // FIXME: this should be set inside cond
                         // cfg[cond_block].end_type =
                         //     Some(EndType::IfElse(cond_var, loop_block, next_block));
@@ -665,17 +676,17 @@ impl Stmt {
 fn make_conditional_context(cfg: &mut CFG, state: &mut State) -> (ConditionalContext, Var) {
     let res = state.fresh_reg(VarType::BOOL);
     let pre_block = cfg.current_block_idx;
-    let then_block = cfg.new_block();
-    let else_block = cfg.new_block();
-    let next_block = cfg.new_block();
+    let then_block = cfg.new_block(BasicBlockKind::MadeCondCtxThen);
+    let else_block = cfg.new_block(BasicBlockKind::MadeCondCtxElse);
+    let next_block = cfg.new_block(BasicBlockKind::MadeCondCtxNext);
     cfg[then_block]
         .quadruples
         .push(Quadruple::Set(res, Instant::bool(true)));
-    cfg[then_block].end_type = Some(EndType::Goto(next_block));
+    cfg[then_block].set_end_type(EndType::Goto(next_block));
     cfg[else_block]
         .quadruples
         .push(Quadruple::Set(res, Instant::bool(false)));
-    cfg[else_block].end_type = Some(EndType::Goto(next_block));
+    cfg[else_block].set_end_type(EndType::Goto(next_block));
 
     let ctx = ConditionalContext {
         pre_block,
@@ -730,7 +741,7 @@ fn finish_cond_ctx_leaf(
             state.get_var_type(var).unwrap(),
             VarType::Simple(SimpleVarType::Bool)
         ));
-        cfg[cond_ctx.pre_block].end_type = Some(EndType::IfElse(
+        cfg[cond_ctx.pre_block].set_end_type(EndType::IfElse(
             var,
             RelOpType::NEq,
             Value::Instant(Instant(0)),
@@ -901,7 +912,7 @@ impl Expr {
                                 }
                             };
 
-                            cfg[cond_ctx.pre_block].end_type = Some(EndType::IfElse(
+                            cfg[cond_ctx.pre_block].set_end_type(EndType::IfElse(
                                 a_var,
                                 rel_op,
                                 b_val,
@@ -1031,7 +1042,7 @@ impl Expr {
                             a.ir(cfg, state, Some(cond_ctx)).ok_or(()).unwrap_err();
                         }
                         (ValueFut::VariableFut(a), ValueFut::VariableFut(b), _) => {
-                            let check_b_block_idx = cfg.new_block();
+                            let check_b_block_idx = cfg.new_block(BasicBlockKind::LogOpSecondCheck);
 
                             // cfg.make_current(, "LogOp");
                             let a_cond_ctx = match op {
