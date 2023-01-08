@@ -392,13 +392,13 @@ struct Frame {
 
 impl Frame {
     fn new(name: Ident, _stack_parameters_count: usize, variables: HashSet<ir::Var>) -> Self {
-        eprintln!("Creating frame with variables: {:?}", variables);
+        // eprintln!("Creating frame with variables: {:?}", variables);
         let variables_mapping = variables
             .into_iter()
             .enumerate()
             .map(|(k, var)| (var, Var(k as isize * -8)))
             .collect::<VecMap<_, _>>();
-        eprintln!("Variables got mappings: {:?}", &variables_mapping);
+        // eprintln!("Variables got mappings: {:?}", &variables_mapping);
 
         Self {
             name,
@@ -496,7 +496,7 @@ impl CFG {
 
         let mut state = AsmGenState::new();
 
-        eprintln!("Building frames");
+        // eprintln!("Building frames");
         let frames = self
             .functions
             .iter()
@@ -531,7 +531,7 @@ impl CFG {
             )
             .collect::<HashMap<_, _>>();
 
-        eprintln!("Built frames: {:#?}\n\n", &frames);
+        // eprintln!("Built frames: {:#?}\n\n", &frames);
 
         writeln!(out, "section .text")?;
         emit_header(out, &mut state, frames.get(&REAL_MAIN.to_string()).unwrap())?;
@@ -549,7 +549,7 @@ impl CFG {
                 assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
                 let func_label = Label::Func(func.clone());
 
-                eprintln!("\nEmitting function: {}", func);
+                // eprintln!("\nEmitting function: {}", func);
                 writeln!(out, "")?;
                 func_label.emit(out)?;
 
@@ -579,10 +579,10 @@ impl CFG {
         next_l: Option<&Label>,
     ) -> AsmGenResult {
         if emitted.contains(&func_block) {
-            eprintln!(
-                "Block: {:?} has already been emitted; returning.",
-                func_block
-            );
+            // eprintln!(
+            //     "Block: {:?} has already been emitted; returning.",
+            //     func_block
+            // );
             return Ok(());
         } else {
             emitted.insert(func_block);
@@ -590,7 +590,7 @@ impl CFG {
 
         let block_label = state.get_block_label(func_block);
         block_label.emit(out)?;
-        eprintln!("Emitting ir block: {:?} as {}", func_block, block_label);
+        // eprintln!("Emitting ir block: {:?} as {}", func_block, block_label);
 
         self[func_block].emit(self, out, frames, frame, state)?;
 

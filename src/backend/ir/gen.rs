@@ -95,9 +95,9 @@ impl CFG {
         &mut self[idx]
     }
 
-    fn make_current(&mut self, idx: BasicBlockIdx, who: &str) {
+    fn make_current(&mut self, idx: BasicBlockIdx, _who: &str) {
         self.current_block_idx = idx;
-        eprintln!("{}: Made {} current block.", who, idx.0);
+        // eprintln!("{}: Made {} current block.", _who, idx.0);
     }
 
     /// Called only for function with our call conventions, i.e. emitted by the compiler.
@@ -193,12 +193,12 @@ impl BasicBlock {
     }
 
     fn set_end_type(&mut self, new_end_type: EndType) {
-        if let Some(ref old_end_type) = self.end_type {
-            eprintln!(
-                "WARNING: replacing end_type for block {} (kind {:?}); it was {:?}, now {:?}",
-                self._idx.0, self._kind, old_end_type, new_end_type
-            )
-        }
+        // if let Some(ref old_end_type) = self.end_type {
+        //     eprintln!(
+        //         "WARNING: replacing end_type for block {} (kind {:?}); it was {:?}, now {:?}",
+        //         self._idx.0, self._kind, old_end_type, new_end_type
+        //     )
+        // }
         self.end_type = Some(new_end_type);
     }
 
@@ -392,7 +392,7 @@ impl Program {
                     .map(|param| (param.name.clone(), param.type_.clone())),
             );
             cfg.new_function(func.name.clone(), func.fun_type(), param_vars);
-            eprintln!("\nEmitting IR for function: {}", &func.name);
+            // eprintln!("\nEmitting IR for function: {}", &func.name);
             func.block.ir(&mut cfg, &mut state);
         }
 
@@ -500,10 +500,10 @@ impl Stmt {
             }
             StmtInner::Return(expr) => {
                 let reg = expr.ir_fut().ir(cfg, state, None);
-                eprintln!(
-                    "Because of Return, setting {} end_type to Return({:?})",
-                    cfg.current_block_idx.0, reg
-                );
+                // eprintln!(
+                //     "Because of Return, setting {} end_type to Return({:?})",
+                //     cfg.current_block_idx.0, reg
+                // );
                 cfg.current_mut().set_end_type(EndType::Return(Some(reg)));
                 let bl = cfg.new_block(BasicBlockKind::AfterReturn);
                 cfg.make_current(bl, "Return");
@@ -694,7 +694,7 @@ fn make_conditional_context(cfg: &mut CFG, state: &mut State) -> (ConditionalCon
         block_false: else_block,
         block_next: next_block,
     };
-    eprintln!("Made cond ctx: {:#?}.", ctx);
+    // eprintln!("Made cond ctx: {:#?}.", ctx);
 
     (ctx, res)
 }
@@ -734,7 +734,7 @@ fn finish_cond_ctx_leaf(
     state: &mut State,
     var: Var,
     cond_ctx: Option<ConditionalContext>,
-    from: &str,
+    _from: &str,
 ) -> Option<Var> {
     if let Some(cond_ctx) = cond_ctx {
         assert!(matches!(
@@ -748,10 +748,10 @@ fn finish_cond_ctx_leaf(
             cond_ctx.block_true,
             cond_ctx.block_false,
         ));
-        eprintln!(
-            "Because of {}, set {} end_type to IfElse(then: {}, else: {}).",
-            from, cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
-        );
+        // eprintln!(
+        //     "Because of {}, set {} end_type to IfElse(then: {}, else: {}).",
+        //     _from, cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
+        // );
         None
     } else {
         Some(var)
@@ -759,12 +759,13 @@ fn finish_cond_ctx_leaf(
 }
 
 impl Expr {
+    #[allow(unused)]
     fn debug_surface<'a>(&'a self) -> DebugExprInner<'a> {
         DebugExprInner(self)
     }
 
     fn ir_fut(&self) -> ValueFut {
-        eprintln!("ir_fut of {:#?}", &self.debug_surface());
+        // eprintln!("ir_fut of {:#?}", &self.debug_surface());
         match match &self.1 {
             ExprInner::Id(_) => None,
             ExprInner::IntLit(i) => Some(Instant(*i)),
@@ -831,11 +832,11 @@ impl Expr {
         state: &mut State,
         cond_ctx: Option<ConditionalContext>,
     ) -> Option<Var> {
-        eprintln!(
-            "ir of {:#?} with cond_ctx {:?}",
-            &self.debug_surface(),
-            cond_ctx
-        );
+        // eprintln!(
+        //     "ir of {:#?} with cond_ctx {:?}",
+        //     &self.debug_surface(),
+        //     cond_ctx
+        // );
         let res = match &self.1 {
             ExprInner::Op(op) => match op {
                 Op::UnOp(un_op, expr) => match un_op {
@@ -919,10 +920,10 @@ impl Expr {
                                 cond_ctx.block_true,
                                 cond_ctx.block_false,
                             ));
-                            eprintln!(
-                                "Because of RelOp, set {} end_type to IfElse(then: {}, else: {}).",
-                                cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
-                            );
+                            // eprintln!(
+                            //     "Because of RelOp, set {} end_type to IfElse(then: {}, else: {}).",
+                            //     cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
+                            // );
                             cfg.make_current(cond_ctx.block_next, "RelOp");
 
                             res
