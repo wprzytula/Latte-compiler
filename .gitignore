@@ -12,4 +12,6 @@ antlr
 *.o
 solution
 javaparser
-.gdb_history
+.gdb_historylattests
+lattests
+tests/gen

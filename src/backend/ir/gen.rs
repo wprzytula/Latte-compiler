@@ -77,7 +77,7 @@ impl CFG {
             )
             .ok_or(())
             .unwrap_err(); // assert unique name
-        self.make_current(entry);
+        self.make_current(entry, "CFG::new_function");
         self.current_mut().entry = true;
     }
 
@@ -95,9 +95,9 @@ impl CFG {
         &mut self[idx]
     }
 
-    fn make_current(&mut self, idx: BasicBlockIdx) {
+    fn make_current(&mut self, idx: BasicBlockIdx, who: &str) {
         self.current_block_idx = idx;
-        eprintln!("Made {} current block.", idx.0);
+        eprintln!("{}: Made {} current block.", who, idx.0);
     }
 
     /// Called only for function with our call conventions, i.e. emitted by the compiler.
@@ -495,12 +495,12 @@ impl Stmt {
                 );
                 cfg.current_mut().end_type = Some(EndType::Return(Some(reg)));
                 let bl = cfg.new_block();
-                cfg.make_current(bl);
+                cfg.make_current(bl, "Return");
             }
             StmtInner::VoidReturn => {
                 cfg.current_mut().end_type = Some(EndType::Return(None));
                 let bl = cfg.new_block();
-                cfg.make_current(bl);
+                cfg.make_current(bl, "Void return");
             }
 
             StmtInner::Cond(cond, then) => {
@@ -533,10 +533,10 @@ impl Stmt {
                         .ok_or(())
                         .unwrap_err(); // we should not return any var from the cond
 
-                        cfg.make_current(then_block);
+                        cfg.make_current(then_block, "Cond then");
                         then.ir(cfg, state);
 
-                        cfg.make_current(next_block);
+                        cfg.make_current(next_block, "Cond next");
 
                         // FIXME: this should be set inside cond
                         // cfg[pre_block].end_type =
@@ -544,7 +544,6 @@ impl Stmt {
                         cfg[then_block]
                             .end_type
                             .get_or_insert(EndType::Goto(next_block));
-                        cfg.make_current(next_block);
                     }
                 }
             }
@@ -580,10 +579,10 @@ impl Stmt {
                         .ok_or(())
                         .unwrap_err(); // we should not return any var from the cond
 
-                        cfg.make_current(then_block);
+                        cfg.make_current(then_block, "CondElse then");
                         then.ir(cfg, state);
 
-                        cfg.make_current(else_block);
+                        cfg.make_current(else_block, "CondElse else");
                         else_br.ir(cfg, state);
 
                         // FIXME: this should be set inside cond
@@ -595,7 +594,7 @@ impl Stmt {
                         cfg[else_block]
                             .end_type
                             .get_or_insert(EndType::Goto(next_block));
-                        cfg.make_current(next_block);
+                        cfg.make_current(next_block, "CondElse next");
                     }
                 }
             }
@@ -618,7 +617,7 @@ impl Stmt {
                             let loop_block = cfg.new_block();
                             cfg[pre_block].end_type = Some(EndType::Goto(loop_block));
                             cfg[loop_block].end_type = Some(EndType::Goto(loop_block));
-                            cfg.make_current(loop_block);
+                            cfg.make_current(loop_block, "While infinite loop");
                             body.ir(cfg, state);
                         }
                     }
@@ -627,7 +626,7 @@ impl Stmt {
                         let loop_block = cfg.new_block();
                         let next_block = cfg.new_block();
 
-                        cfg.make_current(cond_block);
+                        cfg.make_current(cond_block, "While cond");
                         cond.ir(
                             cfg,
                             state,
@@ -641,10 +640,10 @@ impl Stmt {
                         .ok_or(())
                         .unwrap_err(); // we should not return any var from the cond
 
-                        cfg.make_current(loop_block);
+                        cfg.make_current(loop_block, "While body");
                         body.ir(cfg, state);
 
-                        cfg.make_current(next_block);
+                        cfg.make_current(next_block, "While next");
 
                         cfg[pre_block].end_type = Some(EndType::Goto(cond_block));
                         cfg[loop_block].end_type = Some(EndType::Goto(cond_block));
@@ -913,7 +912,7 @@ impl Expr {
                                 "Because of RelOp, set {} end_type to IfElse(then: {}, else: {}).",
                                 cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
                             );
-                            cfg.make_current(cond_ctx.block_next);
+                            cfg.make_current(cond_ctx.block_next, "RelOp");
 
                             res
                         }
@@ -1034,7 +1033,7 @@ impl Expr {
                         (ValueFut::VariableFut(a), ValueFut::VariableFut(b), _) => {
                             let check_b_block_idx = cfg.new_block();
 
-                            cfg.make_current(check_b_block_idx);
+                            // cfg.make_current(, "LogOp");
                             let a_cond_ctx = match op {
                                 LogOpType::And => ConditionalContext {
                                     block_true: check_b_block_idx,
@@ -1056,7 +1055,7 @@ impl Expr {
 
                             a.ir(cfg, state, Some(a_cond_ctx)).ok_or(()).unwrap_err();
 
-                            cfg.make_current(check_b_block_idx);
+                            cfg.make_current(check_b_block_idx, "LogOp check_b");
                             b.ir(cfg, state, Some(b_cond_ctx)).ok_or(()).unwrap_err();
                         }
                     };
@@ -1093,7 +1092,7 @@ impl Expr {
             ExprInner::LVal(lval) => lval.ir(cfg, state, cond_ctx),
         };
         if let Some(cond_ctx) = cond_ctx {
-            cfg.make_current(cond_ctx.block_next);
+            cfg.make_current(cond_ctx.block_next, "Expr finish");
         }
         res
     }
@@ -1145,7 +1144,7 @@ impl LVal {
             LValInner::New(_) => todo!(),
         };
         if let Some(cond_ctx) = cond_ctx {
-            cfg.make_current(cond_ctx.block_next);
+            cfg.make_current(cond_ctx.block_next, "LVal finish");
         }
         res
     }
