@@ -1,6 +1,6 @@
 use std::{
     fs::{read_dir, File},
-    io::{self, Read, Write},
+    io::{Read, Write},
     path::Path,
     process::{Command, Stdio},
 };
@@ -9,7 +9,7 @@ use latte::{
     backend::compile,
     frontend::{
         parser::build_parser,
-        semantic_analysis::{ast::Program, TypeCheckError},
+        semantic_analysis::ast::Program,
     },
 };
 
