@@ -110,6 +110,7 @@ pub fn compile(path: impl AsRef<Path>) -> Result<(), CompilerError> {
     execute(
         "gcc",
         &[
+            // "-fsanitize=address",
             "-o",
             bin_filepath.to_str().unwrap(),
             RUNTIME_PATH,

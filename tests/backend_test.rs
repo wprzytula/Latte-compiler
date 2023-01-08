@@ -1,5 +1,6 @@
 use std::{
     fs::{read_dir, File},
+    io::{self, Read, Write},
     path::Path,
     process::{Command, Stdio},
 };
@@ -86,6 +87,19 @@ fn lattests_compile_core() {
                     bin_path.display()
                 );
 
+                let input_name = name.replace(".lat", ".input");
+                let input = {
+                    let full_input_path = path.join(input_name);
+                    full_input_path.exists().then(|| {
+                        let mut buf = String::new();
+                        File::open(full_input_path)
+                            .unwrap()
+                            .read_to_string(&mut buf)
+                            .unwrap();
+                        buf
+                    })
+                };
+
                 let mut diff = Command::new("diff")
                     .arg("-")
                     .arg(full_output_path)
@@ -94,10 +108,15 @@ fn lattests_compile_core() {
                     .expect("Diff spawn error");
 
                 let mut bin_exec = Command::new(bin_path)
+                    .stdin(Stdio::piped())
                     .stderr(Stdio::inherit())
                     .stdout(diff.stdin.take().unwrap())
                     .spawn()
                     .expect("Bin spawn error");
+
+                if let Some(input) = input {
+                    write!(bin_exec.stdin.as_mut().unwrap(), "{}", input).unwrap();
+                }
 
                 bin_exec.wait().expect("Bin wait error");
 

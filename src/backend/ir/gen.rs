@@ -343,17 +343,16 @@ mod state {
         ) -> Vec<Var> {
             self.var_location = Map::new();
             params
-                .map(|(param_name, param_type)| self.declare_var(param_name, param_type.into()))
+                .map(|(param_name, param_type)| {
+                    let var = self.fresh_reg(param_type.into());
+                    self.declare_var(param_name, var);
+                    var
+                })
                 .collect()
         }
 
-        pub(crate) fn declare_var(&mut self, id: Ident, typ: VarType) -> Var {
-            // assert!(!self.var_location.contains_key(&id));
-            let var = Var(self.next_var_num);
-            self.next_var_num += 1;
+        pub(crate) fn declare_var(&mut self, id: Ident, var: Var) {
             self.var_location.insert_mut(id, var);
-            self.var_types.insert(var, typ);
-            var
         }
 
         pub(crate) fn retrieve_var(&mut self, id: &Ident) -> Var {
@@ -439,7 +438,7 @@ impl Stmt {
             StmtInner::Block(block) => block.ir(cfg, &mut state.new_scope()),
             StmtInner::VarDecl(decls) => {
                 for decl in decls.decls.iter() {
-                    let var = state.declare_var(decl.name.clone(), decls.type_.clone().into());
+                    let var = state.fresh_reg(decls.type_.clone().into());
                     if let Some(init) = decl.init.as_ref() {
                         let fut = init.ir_fut();
                         match fut {
@@ -457,6 +456,7 @@ impl Stmt {
                             .quadruples
                             .push(Quadruple::Set(var, Instant(0)))
                     }
+                    state.declare_var(decl.name.clone(), var);
                 }
             }
             StmtInner::Ass(lval, rval) => {
@@ -489,6 +489,10 @@ impl Stmt {
             }
             StmtInner::Return(expr) => {
                 let reg = expr.ir_fut().ir(cfg, state, None);
+                eprintln!(
+                    "Because of Return, setting {} end_type to Return({:?})",
+                    cfg.current_block_idx.0, reg
+                );
                 cfg.current_mut().end_type = Some(EndType::Return(Some(reg)));
                 let bl = cfg.new_block();
                 cfg.make_current(bl);
@@ -909,6 +913,7 @@ impl Expr {
                                 "Because of RelOp, set {} end_type to IfElse(then: {}, else: {}).",
                                 cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
                             );
+                            cfg.make_current(cond_ctx.block_next);
 
                             res
                         }
@@ -1106,7 +1111,7 @@ impl LVal {
         } else {
             None
         };
-        match &self.1 {
+        let res = match &self.1 {
             LValInner::Id(var_id) => {
                 let var = state.retrieve_var(var_id);
                 finish_cond_ctx_leaf(cfg, state, var, cond_ctx, "LVal Id")
@@ -1138,7 +1143,11 @@ impl LVal {
                 // args,
             } => todo!(),
             LValInner::New(_) => todo!(),
+        };
+        if let Some(cond_ctx) = cond_ctx {
+            cfg.make_current(cond_ctx.block_next);
         }
+        res
     }
 }
 
