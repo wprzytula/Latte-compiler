@@ -1052,11 +1052,16 @@ impl Expr {
                                             Some(Constexpr::Int(i2)),
                                         ) = (constval1, constval2)
                                         {
+                                            match (int_ret_op, i2) {
+                                                (IntRetType::Div, 0) => panic!("Attempted to divide by zero in the source code!"),
+                                                (IntRetType::Mod, 0) => panic!("Attempted to compute modulo zero in the source code!"),
+                                                _ => (),
+                                            };
                                             Some(Constexpr::Int(match int_ret_op {
+                                                IntRetType::Sub => i1 - i2,
                                                 IntRetType::Mul => i1 * i2,
                                                 IntRetType::Div => i1 / i2,
                                                 IntRetType::Mod => i1 % i2,
-                                                IntRetType::Sub => i1 - i2,
                                             }))
                                         } else {
                                             None
