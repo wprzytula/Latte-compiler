@@ -40,8 +40,9 @@ fn lattests_compile_core() {
     let good_paths = [
         "lattests/good",
         "mrjp-tests/good/basic",
-        "pp/good",
-        "wp/good",
+        "pp/good/core",
+        "wp/good/core",
+        "margdoc/good",
     ];
 
     let good = good_paths
