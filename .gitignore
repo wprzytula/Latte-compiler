@@ -15,3 +15,5 @@ javaparser
 .gdb_historylattests
 lattests
 tests/gen
+solution_front
+solution_back
