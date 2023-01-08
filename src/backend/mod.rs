@@ -105,7 +105,10 @@ pub fn compile(path: impl AsRef<Path>) -> Result<(), CompilerError> {
             o_filepath.to_str().unwrap(),
             asm_filepath.to_str().unwrap(),
         ],
-    )?;
+    )?
+    .success()
+    .then_some(())
+    .unwrap_or_else(|| panic!("NASM error!"));
 
     execute(
         "gcc",
@@ -116,7 +119,10 @@ pub fn compile(path: impl AsRef<Path>) -> Result<(), CompilerError> {
             RUNTIME_PATH,
             o_filepath.to_str().unwrap(),
         ],
-    )?;
+    )?
+    .success()
+    .then_some(())
+    .unwrap_or_else(|| panic!("GCC error!"));
 
     Ok(())
 }
