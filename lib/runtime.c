@@ -20,15 +20,27 @@ void printString(char* str) {
 long long readInt() {
     long long in;
     scanf("%lli", &in);
+    int i = getchar();
+    if (i != '\n') {
+        fprintf(stderr, "int not followed by newline, nonsupported case. Terminating.\n");
+        exit(1);
+    }
     return in;
 }
 
 char* readString() {
     // size_t getline (char **string, size_t *n, FILE *stream);
     char *dst = NULL;
-    long long len = getline(&dst, NULL, stdin);
+    size_t buf_len = 0;
+    long long len = getline(&dst, &buf_len, stdin);
+    if (len < 0) {
+        fprintf(stderr, "getline returned %lli; terminating.\n", len);
+        exit(1);
+    }
+    fprintf(stderr, "Read len bytes: %lli\n", len);
     dst = realloc(dst, len + sizeof(long long));
     memmove(dst + sizeof(long long), dst, len);
+    *(unsigned long long*)dst = len - 1; // drop newline
     return dst;
 }
 
@@ -36,7 +48,7 @@ static char* __alloc_string(unsigned long long len) {
     fprintf(stderr, "Allocating string for len %lli\n", len);
     char *const str = malloc(len + sizeof(unsigned long long));
     if (!str) {
-        fprintf(stderr, "malloc returned NULL; terminating.");
+        fprintf(stderr, "malloc returned NULL; terminating.\n");
         exit(1);
     }
     return str;
