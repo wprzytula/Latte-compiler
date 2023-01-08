@@ -9,9 +9,12 @@ frontend: cargo_clean
 cargo_clean:
 	cargo clean -p latte
 
-latc_x86_64: cargo_clean
+latc_x86_64: cargo_clean runtime
 	cargo build --release --bin compiler
 	cp target/release/compiler latc_x86_64
 
+runtime: lib/runtime.c
+	gcc -O2 -c lib/runtime.c -o lib/runtime.o
+
 clean: cargo_clean
-	rm -f latc_x86_64
+	rm -f latc_x86_64 lib/runtime.o
