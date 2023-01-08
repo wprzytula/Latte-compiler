@@ -96,9 +96,6 @@ newtype
     | 'string' '[' expr ']'     # NStrArr
     | 'boolean' '[' expr ']'    # NBooleanArr
     | ID '[' expr ']'           # NClassArr
-    | 'int'                     # NInt
-    | 'string'                  # NStr
-    | 'boolean'                 # NBool
     | ID                        # NClass
     ;
 

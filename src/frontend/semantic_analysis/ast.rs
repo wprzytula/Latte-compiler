@@ -282,9 +282,6 @@ impl<'a> Display for DisplayParams<'a> {
 
 #[derive(Debug, Clone)]
 pub enum NewType {
-    TInt,
-    TString,
-    TBoolean,
     TClass(Ident),
     TIntArr(Box<Expr>),
     TStringArr(Box<Expr>),
@@ -294,9 +291,6 @@ pub enum NewType {
 impl Display for NewType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NewType::TInt => write!(f, "int"),
-            NewType::TString => write!(f, "string"),
-            NewType::TBoolean => write!(f, "boolean"),
             NewType::TClass(id) => write!(f, "{}", id),
             NewType::TIntArr(len) => write!(f, "int[{:#?}]", len),
             NewType::TStringArr(len) => write!(f, "string[{:#?}]", len),

@@ -919,9 +919,6 @@ impl LVal {
             }
             LValInner::New(new_type) => {
                 let (data_type, len) = match new_type {
-                    NewType::TInt => (DataType::Nonvoid(NonvoidType::TInt), None),
-                    NewType::TString => (DataType::Nonvoid(NonvoidType::TString), None),
-                    NewType::TBoolean => (DataType::Nonvoid(NonvoidType::TBoolean), None),
                     NewType::TClass(c) => {
                         env.get_class(c)
                             .map_err(|MissingClassDeclarationError(class)| {

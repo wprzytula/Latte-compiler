@@ -403,22 +403,6 @@ impl<'a, 'input> LatteVisitorCompat<'input> for ConverterVisitor {
         Self::Return::Nonvoid(NonvoidType::TInt)
     }
 
-    /* NewType */
-    fn visit_NInt(&mut self, ctx: &NIntContext<'input>) -> Self::Return {
-        assert!(self.visit_children(ctx).is_default());
-        Self::Return::NewType(NewType::TInt)
-    }
-
-    fn visit_NStr(&mut self, ctx: &NStrContext<'input>) -> Self::Return {
-        assert!(self.visit_children(ctx).is_default());
-        Self::Return::NewType(NewType::TString)
-    }
-
-    fn visit_NBool(&mut self, ctx: &NBoolContext<'input>) -> Self::Return {
-        assert!(self.visit_children(ctx).is_default());
-        Self::Return::NewType(NewType::TBoolean)
-    }
-
     /* Expr */
     fn visit_ELVal(&mut self, ctx: &ELValContext<'input>) -> Self::Return {
         let e_lval = self.visit_children(ctx).into_l_val().unwrap();

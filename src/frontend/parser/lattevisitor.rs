@@ -442,33 +442,6 @@ pub trait LatteVisitor<'input>: ParseTreeVisitor<'input, LatteParserContextType>
     }
 
     /**
-     * Visit a parse tree produced by the {@code NInt}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn visit_NInt(&mut self, ctx: &NIntContext<'input>) {
-        self.visit_children(ctx)
-    }
-
-    /**
-     * Visit a parse tree produced by the {@code NStr}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn visit_NStr(&mut self, ctx: &NStrContext<'input>) {
-        self.visit_children(ctx)
-    }
-
-    /**
-     * Visit a parse tree produced by the {@code NBool}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn visit_NBool(&mut self, ctx: &NBoolContext<'input>) {
-        self.visit_children(ctx)
-    }
-
-    /**
      * Visit a parse tree produced by the {@code NClass}
      * labeled alternative in {@link LatteParser#newtype}.
      * @param ctx the parse tree
@@ -1080,33 +1053,6 @@ pub trait LatteVisitorCompat<'input>:
     }
 
     /**
-     * Visit a parse tree produced by the {@code NInt}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn visit_NInt(&mut self, ctx: &NIntContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
-    }
-
-    /**
-     * Visit a parse tree produced by the {@code NStr}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn visit_NStr(&mut self, ctx: &NStrContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
-    }
-
-    /**
-     * Visit a parse tree produced by the {@code NBool}
-     * labeled alternative in {@link LatteParser#newtype}.
-     * @param ctx the parse tree
-     */
-    fn visit_NBool(&mut self, ctx: &NBoolContext<'input>) -> Self::Return {
-        self.visit_children(ctx)
-    }
-
-    /**
      * Visit a parse tree produced by the {@code NClass}
      * labeled alternative in {@link LatteParser#newtype}.
      * @param ctx the parse tree
@@ -1527,21 +1473,6 @@ where
 
     fn visit_NClassArr(&mut self, ctx: &NClassArrContext<'input>) {
         let result = <Self as LatteVisitorCompat>::visit_NClassArr(self, ctx);
-        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
-    }
-
-    fn visit_NInt(&mut self, ctx: &NIntContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_NInt(self, ctx);
-        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
-    }
-
-    fn visit_NStr(&mut self, ctx: &NStrContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_NStr(self, ctx);
-        *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
-    }
-
-    fn visit_NBool(&mut self, ctx: &NBoolContext<'input>) {
-        let result = <Self as LatteVisitorCompat>::visit_NBool(self, ctx);
         *<Self as ParseTreeVisitorCompat>::temp_result(self) = result;
     }
 
