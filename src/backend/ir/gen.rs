@@ -1135,7 +1135,7 @@ impl LVal {
                 cfg.current_mut().quadruples.push(Quadruple::Call(
                     retvar,
                     if name == "main" {
-                        "real_main".into()
+                        REAL_MAIN.into()
                     } else {
                         name.clone()
                     },
