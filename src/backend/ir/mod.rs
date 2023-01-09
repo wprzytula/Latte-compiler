@@ -16,6 +16,8 @@ use crate::frontend::semantic_analysis::{
     FunType, INITIAL_FUNCS,
 };
 
+use super::asmgen::QUADWORD_SIZE;
+
 #[derive(Debug, Clone, Copy, EnumAsInner)]
 pub enum Value {
     Instant(Instant),
@@ -103,7 +105,7 @@ impl RelOpType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
 pub enum VarType {
     Simple(SimpleVarType),
     Ptr(PtrVarType),
@@ -121,18 +123,30 @@ impl VarType {
      * where b1b2b3...bn is the string content and usize is equal to n.
      * */
     const STRING: VarType = VarType::Ptr(PtrVarType::String);
+
+    fn class(name: Ident) -> Self {
+        Self::Ptr(PtrVarType::Class(name))
+    }
+
+    fn as_class(&self) -> Option<&Ident> {
+        self.as_ptr().and_then(|ptr| ptr.as_class())
+    }
+
+    fn into_class(self) -> Option<Ident> {
+        self.into_ptr().ok().and_then(|res| res.into_class().ok())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StringLiteral(pub usize);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
 pub enum SimpleVarType {
     Int,
     Bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
 pub enum PtrVarType {
     String,
     Class(Ident),
@@ -167,8 +181,9 @@ pub enum Quadruple {
 
     ArrLoad(Var, Var, Value),  // (dst, arr, idx)
     ArrStore(Var, Value, Var), // (arr, idx, src)
-    DerefLoad(Var, Var),       // (dst, ptr)
-    DerefStore(Value, Var),    // (src, ptr)
+
+    DerefLoad(Var, Var, usize),    // (dst, ptr, offset)
+    DerefStore(Value, Var, usize), // (src, ptr, offset)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -200,6 +215,7 @@ pub struct CFG {
     current_block_idx: BasicBlockIdx,
     current_func: Ident,
     pub functions: HashMap<Ident, IrFunction>,
+    pub classes: Vec<Class>,
 }
 
 impl Index<BasicBlockIdx> for CFG {
@@ -253,4 +269,58 @@ pub struct BasicBlock {
     entry: bool,
     pub end_type: Option<EndType>,
     phi_nodes: VecMap<Var, VecMap<BasicBlockIdx, Var>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ClassIdx(usize);
+
+#[derive(Debug)]
+pub struct Field {
+    offset: usize,
+    typ: VarType,
+}
+
+#[derive(Debug)]
+pub struct Class {
+    _idx: ClassIdx,
+    base_idx: Option<ClassIdx>,
+    pub size: usize, // num elems, TODO: for virtual classes add VST size
+    pub fields: VecMap<Ident, Field>,
+}
+
+impl Class {
+    fn new(idx: ClassIdx) -> Self {
+        Self {
+            _idx: idx,
+            base_idx: None,
+            size: 0,
+            fields: VecMap::new(),
+        }
+    }
+
+    fn add_field(&mut self, name: Ident, typ: VarType) {
+        let field_idx = self.fields.len();
+        self.fields.insert(
+            name,
+            Field {
+                typ,
+                offset: field_idx * QUADWORD_SIZE,
+            },
+        );
+        self.size += 1;
+    }
+
+    fn resolve_field<'a>(&'a self, classes: &'a Vec<Class>, field_name: &Ident) -> &'a Field {
+        if let Some(field) = self.fields.get(field_name) {
+            return field;
+        }
+        let mut class = self;
+        while let Some(base_idx) = class.base_idx {
+            class = &classes[base_idx.0];
+            if let Some(field) = class.fields.get(field_name) {
+                return field;
+            }
+        }
+        unreachable!();
+    }
 }

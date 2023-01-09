@@ -14,6 +14,7 @@ fn mangle_method(name: &Ident, class: &Ident) -> Ident {
 
 pub(crate) const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
 pub(crate) const REAL_MAIN: &str = "__real_main";
+pub(crate) const NEW: &str = "__new";
 
 impl CFG {
     /** Built-in functions:
@@ -28,9 +29,16 @@ impl CFG {
             .iter()
             .cloned()
             .chain(iter::once((
-                "__concat_strings".to_string(),
+                CONCAT_STRINGS_FUNC.to_string(),
                 FunType {
                     ret_type: DataType::Nonvoid(NonvoidType::TString),
+                    params: vec![NonvoidType::TString, NonvoidType::TString],
+                },
+            )))
+            .chain(iter::once((
+                NEW.to_string(),
+                FunType {
+                    ret_type: DataType::Nonvoid(NonvoidType::TClass("ANY".into())),
                     params: vec![NonvoidType::TString, NonvoidType::TString],
                 },
             )))
@@ -56,6 +64,7 @@ impl CFG {
             current_block_idx: BasicBlockIdx(usize::MAX),
             current_func: Ident::new(),
             functions: built_in_functions,
+            classes: vec![],
         }
     }
 
@@ -214,11 +223,11 @@ impl BasicBlock {
                 | Quadruple::Copy(var, _)
                 | Quadruple::Set(var, _)
                 | Quadruple::GetStrLit(var, _)
-                | Quadruple::Call(var, _, _) => Some(*var),
+                | Quadruple::Call(var, _, _)
+                | Quadruple::DerefLoad(var, _, _) => Some(*var),
+                Quadruple::DerefStore(_, _, _) => None,
                 Quadruple::ArrLoad(_, _, _) => todo!(),
                 Quadruple::ArrStore(_, _, _) => todo!(),
-                Quadruple::DerefLoad(_, _) => todo!(),
-                Quadruple::DerefStore(_, _) => todo!(),
             })
         {
             buf.insert(var);
@@ -252,8 +261,16 @@ impl BasicBlock {
 
                 Quadruple::ArrLoad(_, _, _) => todo!(),
                 Quadruple::ArrStore(_, _, _) => todo!(),
-                Quadruple::DerefLoad(_, _) => todo!(),
-                Quadruple::DerefStore(_, _) => todo!(),
+                Quadruple::DerefLoad(var1, var2, _) => {
+                    vars.insert(*var1);
+                    vars.insert(*var2);
+                }
+                Quadruple::DerefStore(val, var, _) => {
+                    vars.insert(*var);
+                    if let Value::Variable(var) = val {
+                        vars.insert(*var);
+                    }
+                }
                 Quadruple::Call(var, _, args) => {
                     vars.insert(*var);
                     for arg in args {
@@ -279,7 +296,7 @@ mod state {
         frontend::semantic_analysis::ast::{Ident, NonvoidType},
     };
 
-    use super::Var;
+    use super::{Class, ClassIdx, Var};
 
     pub struct StateGuard<'a>(&'a mut State, State);
 
@@ -310,6 +327,8 @@ mod state {
         pub string_literals: Vec<String>,
         next_var_num: usize,
         pub var_types: VecMap<Var, VarType>,
+        next_class_num: usize,
+        class_mapping: VecMap<Ident, ClassIdx>,
 
         /* env-like flow */
         var_location: Map<Ident, Var>,
@@ -321,6 +340,8 @@ mod state {
                 string_literals: Vec::new(),
                 var_location: Map::new(),
                 var_types: VecMap::new(),
+                next_class_num: 0,
+                class_mapping: VecMap::new(),
             }
         }
 
@@ -337,12 +358,14 @@ mod state {
 
         pub(crate) fn new_scope<'a>(&'a mut self) -> StateGuard<'a> {
             let string_literals = std::mem::take(&mut self.string_literals);
+            let class_mapping = std::mem::replace(&mut self.class_mapping, VecMap::new());
             StateGuard(
                 self,
                 Self {
                     var_location: self.var_location.clone(),
                     var_types: self.var_types.clone(),
                     string_literals,
+                    class_mapping,
                     ..*self
                 },
             )
@@ -377,6 +400,17 @@ mod state {
             self.string_literals.push(string);
             StringLiteral(self.string_literals.len() - 1)
         }
+
+        pub(crate) fn register_class(&mut self, class: Ident) -> ClassIdx {
+            let class_idx = ClassIdx(self.next_class_num);
+            self.next_class_num += 1;
+            self.class_mapping.insert(class, class_idx);
+            class_idx
+        }
+
+        pub(crate) fn retrieve_class_idx(&self, class: &Ident) -> ClassIdx {
+            *self.class_mapping.get(class).unwrap()
+        }
     }
 }
 
@@ -384,6 +418,26 @@ impl Program {
     pub fn ir(&self) -> Ir {
         let mut state = State::new();
         let mut cfg = CFG::new(&mut state);
+
+        for ClassDef {
+            class,
+            base_class,
+            class_block: ClassBlock(class_items),
+            ..
+        } in self.1.iter()
+        {
+            assert!(base_class.is_none()); // for now, only structs
+            let class_idx = state.register_class(class.clone());
+            let mut class = Class::new(class_idx);
+            for class_item in class_items {
+                match class_item {
+                    ClassItem::Field(_, typ, name) => {
+                        class.add_field(name.clone(), typ.clone().into());
+                    }
+                    ClassItem::Method(_) => unimplemented!("Not yet supported"),
+                }
+            }
+        }
 
         for func in self.0.iter() {
             let param_vars = state.enter_new_frame_and_give_params(
@@ -1144,7 +1198,21 @@ impl LVal {
                 finish_cond_ctx_leaf(cfg, state, retvar, cond_ctx, "FunCall Id")
             }
 
-            LValInner::FieldAccess(_, _) => todo!(),
+            LValInner::FieldAccess(lval, field_name) => {
+                let lvar = lval.ir(cfg, state, cond_ctx).unwrap();
+                let typ = state.get_var_type(lvar).unwrap();
+                // let typ_front = lval.2.borrow_mut().as_ref().unwrap().clone();
+                // assert_eq!(typ_front.into() as VarType, *typ);
+
+                let class_name = typ.as_class().unwrap();
+                let class_idx = state.retrieve_class_idx(&class_name);
+                let class_info = cfg.classes.get(class_idx.0).unwrap();
+                let field = class_info.resolve_field(&cfg.classes, field_name);
+                let field_offset = field.offset;
+                let res = state.fresh_reg(field.typ.clone());
+                cfg.current_mut().quadruples.push(Quadruple::DerefLoad(res, lvar, field_offset));
+                Some(res)
+            },
             LValInner::ArrSub(_, _) => todo!(),
             LValInner::MethodCall {
                 ..
@@ -1152,7 +1220,21 @@ impl LVal {
                 // method_name,
                 // args,
             } => todo!(),
-            LValInner::New(_) => todo!(),
+            LValInner::New(typ) => {
+                match typ {
+                    NewType::TClass(name) => {
+                        let class_idx = state.retrieve_class_idx(name);
+                        let class_size = cfg.classes[class_idx.0].size;
+                        let var = state.fresh_reg(VarType::class(name.clone()));
+                        cfg.current_mut().quadruples.push(Quadruple::Call(var, NEW.into(), vec![Value::Instant(Instant(class_size as i64))]));
+                        Some(var)
+                    },
+                    NewType::TIntArr(_) |
+                    NewType::TStringArr(_) |
+                    NewType::TBooleanArr(_) |
+                    NewType::TClassArr(_, _) => todo!(),
+                }
+            },
         };
         if let Some(cond_ctx) = cond_ctx {
             cfg.make_current(cond_ctx.block_next, "LVal finish");
@@ -1160,5 +1242,3 @@ impl LVal {
         res
     }
 }
-
-// TODO: tests for programs that reduce at compile time, e.g. if( 1 + 3 == 4).

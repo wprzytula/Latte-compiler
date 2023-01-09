@@ -30,10 +30,16 @@ impl Quadruple {
                     rename_val(val, prev, current);
                 }
             }
+            Quadruple::DerefLoad(var1, var2, _) => {
+                rename_var(var1, prev, current);
+                rename_var(var2, prev, current)
+            }
+            Quadruple::DerefStore(val, var, _) => {
+                rename_val(val, prev, current);
+                rename_var(var, prev, current);
+            }
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _) => todo!(),
-            Quadruple::DerefStore(_, _) => todo!(),
         }
     }
 
@@ -45,11 +51,11 @@ impl Quadruple {
             | Quadruple::Copy(ass, _)
             | Quadruple::Set(ass, _)
             | Quadruple::GetStrLit(ass, _)
-            | Quadruple::Call(ass, _, _) => *ass == var,
+            | Quadruple::Call(ass, _, _)
+            | Quadruple::DerefLoad(ass, _, _) => *ass == var,
+            Quadruple::DerefStore(_, _, _) => false,
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _) => todo!(),
-            Quadruple::DerefStore(_, _) => todo!(),
         }
     }
 
@@ -63,11 +69,11 @@ impl Quadruple {
             | Quadruple::Copy(ass, _)
             | Quadruple::Set(ass, _)
             | Quadruple::GetStrLit(ass, _)
-            | Quadruple::Call(ass, _, _) => *ass = current,
+            | Quadruple::Call(ass, _, _)
+            | Quadruple::DerefLoad(ass, _, _) => *ass = current,
+            Quadruple::DerefStore(_, _, _) => (),
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _) => todo!(),
-            Quadruple::DerefStore(_, _) => todo!(),
         }
     }
 }

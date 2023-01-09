@@ -17,7 +17,7 @@ use super::ir::{
 };
 
 const ARGS_IN_REGISTERS: usize = 6;
-const QUADWORD_SIZE: usize = 8; // in bytes
+pub const QUADWORD_SIZE: usize = 8; // in bytes
 const RETADDR_SIZE: usize = QUADWORD_SIZE;
 
 fn params_registers() -> impl Iterator<Item = Reg> {
@@ -27,6 +27,19 @@ fn params_registers() -> impl Iterator<Item = Reg> {
 const SYS_EXIT: Instant = Instant(60);
 
 type AsmGenResult = io::Result<()>;
+
+enum Loc {
+    Reg(Reg),
+    Mem(Mem),
+}
+impl Display for Loc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Loc::Reg(reg) => write!(f, "{}", reg),
+            Loc::Mem(mem) => write!(f, "{}", mem),
+        }
+    }
+}
 
 enum Val {
     Reg(Reg),
@@ -283,9 +296,9 @@ enum Instr {
     IDivReg(Reg), // RDX:RAX divided by Reg, quotient in RAX, remainder in RDX.
     IDivMem(Mem), // RDX:RAX divided by Mem, quotient in RAX, remainder in RDX.
     Cqo,          // Prepared RDX as empty for IDiv
-    Inc(Reg),
-    Dec(Reg),
-    Neg(Reg),
+    Inc(Loc),
+    Dec(Loc),
+    Neg(Loc),
     Not(Reg),
     And(Reg, Val),
     Or(Reg, Val),
@@ -783,9 +796,9 @@ impl Quadruple {
                 Instr::MovToReg(RAX, frame.get_val(*op, state.rsp_displacement)).emit(out)?;
                 match un_op_type {
                     UnOpType::Not => Instr::Not(RAX).emit(out)?,
-                    UnOpType::Neg => Instr::Neg(RAX).emit(out)?,
-                    UnOpType::Inc => Instr::Inc(RAX).emit(out)?,
-                    UnOpType::Dec => Instr::Dec(RAX).emit(out)?,
+                    UnOpType::Neg => Instr::Neg(Loc::Reg(RAX)).emit(out)?,
+                    UnOpType::Inc => Instr::Inc(Loc::Reg(RAX)).emit(out)?,
+                    UnOpType::Dec => Instr::Dec(Loc::Reg(RAX)).emit(out)?,
                 }
                 Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
@@ -877,8 +890,8 @@ impl Quadruple {
 
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _) => todo!(),
-            Quadruple::DerefStore(_, _) => todo!(),
+            Quadruple::DerefLoad(_, _, _) => todo!(),
+            Quadruple::DerefStore(_, _, _) => todo!(),
         };
         Ok(())
     }

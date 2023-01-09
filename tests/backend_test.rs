@@ -7,10 +7,7 @@ use std::{
 
 use latte::{
     backend::compile,
-    frontend::{
-        parser::build_parser,
-        semantic_analysis::ast::Program,
-    },
+    frontend::{parser::build_parser, semantic_analysis::ast::Program},
 };
 
 #[derive(Debug)]
