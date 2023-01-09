@@ -1,6 +1,6 @@
 use vector_map::VecMap;
 
-use super::{gen::State, BasicBlockIdx, EndType, Quadruple, Value, Var, CFG};
+use super::{gen::State, BasicBlockIdx, EndType, Loc, Mem, Quadruple, Value, Var, CFG};
 
 fn rename_var(var: &mut Var, prev: Var, current: Var) {
     if *var == prev {
@@ -12,6 +12,19 @@ fn rename_val(val: &mut Value, prev: Var, current: Var) {
     if let Value::Variable(var) = val {
         rename_var(var, prev, current)
     }
+}
+fn rename_mem(mem: &mut Mem, prev: Var, current: Var) {
+    rename_var(&mut mem.base, prev, current);
+}
+fn rename_loc(loc: &mut Loc, prev: Var, current: Var) {
+    rename_var(
+        match loc {
+            Loc::Var(var) => var,
+            Loc::Mem(Mem { base, .. }) => base,
+        },
+        prev,
+        current,
+    )
 }
 
 impl Quadruple {
@@ -30,13 +43,16 @@ impl Quadruple {
                     rename_val(val, prev, current);
                 }
             }
-            Quadruple::DerefLoad(var1, var2, _) => {
-                rename_var(var1, prev, current);
-                rename_var(var2, prev, current)
-            }
-            Quadruple::DerefStore(val, var, _) => {
-                rename_val(val, prev, current);
+            Quadruple::DerefLoad(var, mem) => {
                 rename_var(var, prev, current);
+                rename_mem(mem, prev, current)
+            }
+            Quadruple::DerefStore(val, mem) => {
+                rename_val(val, prev, current);
+                rename_mem(mem, prev, current);
+            }
+            Quadruple::InPlaceUnOp(_, loc) => {
+                rename_loc(loc, prev, current);
             }
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
@@ -52,8 +68,9 @@ impl Quadruple {
             | Quadruple::Set(ass, _)
             | Quadruple::GetStrLit(ass, _)
             | Quadruple::Call(ass, _, _)
-            | Quadruple::DerefLoad(ass, _, _) => *ass == var,
-            Quadruple::DerefStore(_, _, _) => false,
+            | Quadruple::DerefLoad(ass, _) => *ass == var,
+            Quadruple::InPlaceUnOp(_, _) => false,
+            Quadruple::DerefStore(_, _) => false,
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
         }
@@ -70,8 +87,9 @@ impl Quadruple {
             | Quadruple::Set(ass, _)
             | Quadruple::GetStrLit(ass, _)
             | Quadruple::Call(ass, _, _)
-            | Quadruple::DerefLoad(ass, _, _) => *ass = current,
-            Quadruple::DerefStore(_, _, _) => (),
+            | Quadruple::DerefLoad(ass, _) => *ass = current,
+            Quadruple::InPlaceUnOp(_, _) => (),
+            Quadruple::DerefStore(_, _) => (),
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
         }

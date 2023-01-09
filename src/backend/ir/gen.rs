@@ -14,7 +14,7 @@ fn mangle_method(name: &Ident, class: &Ident) -> Ident {
 
 pub(crate) const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
 pub(crate) const REAL_MAIN: &str = "__real_main";
-pub(crate) const NEW: &str = "__new";
+pub(crate) const NEW_FUNC: &str = "__new";
 
 impl CFG {
     /** Built-in functions:
@@ -36,9 +36,9 @@ impl CFG {
                 },
             )))
             .chain(iter::once((
-                NEW.to_string(),
+                NEW_FUNC.to_string(),
                 FunType {
-                    ret_type: DataType::Nonvoid(NonvoidType::TClass("ANY".into())),
+                    ret_type: DataType::Nonvoid(NonvoidType::TClass("ANY".into())), // TODO
                     params: vec![NonvoidType::TString, NonvoidType::TString],
                 },
             )))
@@ -224,8 +224,9 @@ impl BasicBlock {
                 | Quadruple::Set(var, _)
                 | Quadruple::GetStrLit(var, _)
                 | Quadruple::Call(var, _, _)
-                | Quadruple::DerefLoad(var, _, _) => Some(*var),
-                Quadruple::DerefStore(_, _, _) => None,
+                | Quadruple::DerefLoad(var, _) => Some(*var),
+                Quadruple::DerefStore(_, _) => None,
+                Quadruple::InPlaceUnOp(_, _) => None,
                 Quadruple::ArrLoad(_, _, _) => todo!(),
                 Quadruple::ArrStore(_, _, _) => todo!(),
             })
@@ -261,12 +262,12 @@ impl BasicBlock {
 
                 Quadruple::ArrLoad(_, _, _) => todo!(),
                 Quadruple::ArrStore(_, _, _) => todo!(),
-                Quadruple::DerefLoad(var1, var2, _) => {
-                    vars.insert(*var1);
-                    vars.insert(*var2);
-                }
-                Quadruple::DerefStore(val, var, _) => {
+                Quadruple::DerefLoad(var, mem) => {
                     vars.insert(*var);
+                    vars.insert(mem.base);
+                }
+                Quadruple::DerefStore(val, mem) => {
+                    vars.insert(mem.base);
                     if let Value::Variable(var) = val {
                         vars.insert(*var);
                     }
@@ -278,6 +279,9 @@ impl BasicBlock {
                             vars.insert(*var);
                         }
                     }
+                }
+                Quadruple::InPlaceUnOp(_, loc) => {
+                    vars.insert(loc.var());
                 }
             };
         }
@@ -296,7 +300,7 @@ mod state {
         frontend::semantic_analysis::ast::{Ident, NonvoidType},
     };
 
-    use super::{Class, ClassIdx, Var};
+    use super::{ClassIdx, Var};
 
     pub struct StateGuard<'a>(&'a mut State, State);
 
@@ -402,6 +406,7 @@ mod state {
         }
 
         pub(crate) fn register_class(&mut self, class: Ident) -> ClassIdx {
+            eprintln!("Registered class {}", &class);
             let class_idx = ClassIdx(self.next_class_num);
             self.next_class_num += 1;
             self.class_mapping.insert(class, class_idx);
@@ -437,6 +442,7 @@ impl Program {
                     ClassItem::Method(_) => unimplemented!("Not yet supported"),
                 }
             }
+            cfg.classes.push(class);
         }
 
         for func in self.0.iter() {
@@ -526,31 +532,31 @@ impl Stmt {
             }
             StmtInner::Ass(lval, rval) => {
                 let rval_fut = rval.ir_fut();
-                let lval = lval.ir(cfg, state, None).unwrap();
-                let quadruple = match rval_fut {
-                    ValueFut::Instant(i) => Quadruple::Set(lval, i),
-                    ValueFut::VariableFut(rval) => {
-                        let var = rval.ir(cfg, state, None).unwrap();
-                        Quadruple::Copy(lval, var)
+                let loc = lval.ir(cfg, state, None).unwrap();
+                let quadruple = match (loc, rval_fut) {
+                    (Loc::Var(lvar), ValueFut::Instant(i)) => Quadruple::Set(lvar, i),
+                    (Loc::Var(lvar), ValueFut::VariableFut(rvar_fut)) => {
+                        let rvar = rvar_fut.ir(cfg, state, None).unwrap();
+                        Quadruple::Copy(lvar, rvar)
+                    }
+                    (Loc::Mem(lmem), rval) => {
+                        let rval = rval.ir(cfg, state, None);
+                        Quadruple::DerefStore(rval, lmem)
                     }
                 };
                 cfg.current_mut().quadruples.push(quadruple);
             }
             StmtInner::Incr(lval) => {
                 let lval = lval.ir(cfg, state, None).unwrap();
-                cfg.current_mut().quadruples.push(Quadruple::UnOp(
-                    lval,
-                    UnOpType::Inc,
-                    Value::Variable(lval),
-                ));
+                cfg.current_mut()
+                    .quadruples
+                    .push(Quadruple::InPlaceUnOp(InPlaceUnOpType::Inc, lval));
             }
             StmtInner::Decr(lval) => {
                 let lval = lval.ir(cfg, state, None).unwrap();
-                cfg.current_mut().quadruples.push(Quadruple::UnOp(
-                    lval,
-                    UnOpType::Dec,
-                    Value::Variable(lval),
-                ));
+                cfg.current_mut()
+                    .quadruples
+                    .push(Quadruple::InPlaceUnOp(InPlaceUnOpType::Dec, lval));
             }
             StmtInner::Return(expr) => {
                 let reg = expr.ir_fut().ir(cfg, state, None);
@@ -1154,7 +1160,16 @@ impl Expr {
                 Some(reg)
             }
 
-            ExprInner::LVal(lval) => lval.ir(cfg, state, cond_ctx),
+            ExprInner::LVal(lval) => lval.ir(cfg, state, cond_ctx).map(|loc| match loc {
+                Loc::Var(var) => var,
+                Loc::Mem(mem) => {
+                    let var = state.fresh_reg(lval.typ().unwrap());
+                    cfg.current_mut()
+                        .quadruples
+                        .push(Quadruple::DerefLoad(var, mem));
+                    var
+                }
+            }),
         };
         if let Some(cond_ctx) = cond_ctx {
             cfg.make_current(cond_ctx.block_next, "Expr finish");
@@ -1164,12 +1179,16 @@ impl Expr {
 }
 
 impl LVal {
+    fn typ(&self) -> Option<VarType> {
+        Some(self.2.borrow().clone()?.into_nonvoid().ok()?.into())
+    }
+
     fn ir(
         &self,
         cfg: &mut CFG,
         state: &mut State,
         cond_ctx: Option<ConditionalContext>,
-    ) -> Option<Var> {
+    ) -> Option<Loc> {
         let typ = if let DataType::Nonvoid(nonvoid) = self.2.borrow().as_ref().unwrap() {
             Some(nonvoid.clone().into())
         } else {
@@ -1178,7 +1197,7 @@ impl LVal {
         let res = match &self.1 {
             LValInner::Id(var_id) => {
                 let var = state.retrieve_var(var_id);
-                finish_cond_ctx_leaf(cfg, state, var, cond_ctx, "LVal Id")
+                finish_cond_ctx_leaf(cfg, state, var, cond_ctx, "LVal Id").map(|var| Loc::Var(var))
             }
             LValInner::FunCall { name, args } => {
                 let args = args
@@ -1195,11 +1214,18 @@ impl LVal {
                     },
                     args,
                 ));
-                finish_cond_ctx_leaf(cfg, state, retvar, cond_ctx, "FunCall Id")
+                finish_cond_ctx_leaf(cfg, state, retvar, cond_ctx, "FunCall Id").map(|var| Loc::Var(var))
             }
 
             LValInner::FieldAccess(lval, field_name) => {
-                let lvar = lval.ir(cfg, state, cond_ctx).unwrap();
+                let lvar = match lval.ir(cfg, state, cond_ctx).unwrap() {
+                    Loc::Var(var) => var,
+                    Loc::Mem(mem) => {
+                        let var = state.fresh_reg(lval.typ().unwrap());
+                        cfg.current_mut().quadruples.push(Quadruple::DerefLoad(var, mem));
+                        var
+                    },
+                };
                 let typ = state.get_var_type(lvar).unwrap();
                 // let typ_front = lval.2.borrow_mut().as_ref().unwrap().clone();
                 // assert_eq!(typ_front.into() as VarType, *typ);
@@ -1209,9 +1235,9 @@ impl LVal {
                 let class_info = cfg.classes.get(class_idx.0).unwrap();
                 let field = class_info.resolve_field(&cfg.classes, field_name);
                 let field_offset = field.offset;
-                let res = state.fresh_reg(field.typ.clone());
-                cfg.current_mut().quadruples.push(Quadruple::DerefLoad(res, lvar, field_offset));
-                Some(res)
+                // let res = state.fresh_reg(field.typ.clone());
+                // cfg.current_mut().quadruples.push(Quadruple::DerefLoad(res, Loc::Mem(Mem{base: lvar, offset: field_offset})));
+                Some(Loc::Mem(Mem{ base: lvar, offset: field_offset }))
             },
             LValInner::ArrSub(_, _) => todo!(),
             LValInner::MethodCall {
@@ -1226,8 +1252,8 @@ impl LVal {
                         let class_idx = state.retrieve_class_idx(name);
                         let class_size = cfg.classes[class_idx.0].size;
                         let var = state.fresh_reg(VarType::class(name.clone()));
-                        cfg.current_mut().quadruples.push(Quadruple::Call(var, NEW.into(), vec![Value::Instant(Instant(class_size as i64))]));
-                        Some(var)
+                        cfg.current_mut().quadruples.push(Quadruple::Call(var, NEW_FUNC.into(), vec![Value::Instant(Instant(class_size as i64))]));
+                        Some(Loc::Var(var))
                     },
                     NewType::TIntArr(_) |
                     NewType::TStringArr(_) |

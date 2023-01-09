@@ -32,15 +32,22 @@ fn parse_file<P: AsRef<Path>>(filename: P) -> Result<Program, ParseError> {
 
 #[test]
 fn lattests_compile_core() {
-    let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
-
-    let good_paths = [
+    lattests_compile(&[
         "lattests/good",
         "mrjp-tests/good/basic",
         "pp/good/core",
         "wp/good/core",
         "margdoc/good",
-    ];
+    ]);
+}
+
+#[test]
+fn lattests_compile_structs() {
+    lattests_compile(&["lattests/extensions/struct"]);
+}
+
+fn lattests_compile(good_paths: &[&str]) {
+    let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
 
     let good = good_paths
         .iter()

@@ -13,7 +13,7 @@ use crate::{
 
 use super::ir::{
     self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, EndType, Instant, Ir,
-    IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC,
+    IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC, NEW_FUNC,
 };
 
 const ARGS_IN_REGISTERS: usize = 6;
@@ -38,6 +38,32 @@ impl Display for Loc {
             Loc::Reg(reg) => write!(f, "{}", reg),
             Loc::Mem(mem) => write!(f, "{}", mem),
         }
+    }
+}
+
+impl Loc {
+    fn new_from_ir_loc(
+        out: &mut impl Write,
+        frame: &Frame,
+        state: &AsmGenState,
+        loc: &ir::Loc,
+    ) -> io::Result<Self> {
+        let var = loc.var();
+        Instr::MovToReg(
+            RAX,
+            Val::Mem(frame.get_variable_mem(var, state.rsp_displacement)),
+        )
+        .emit(out)?;
+
+        Ok(match loc {
+            ir::Loc::Var(_) => Loc::Reg(RAX),
+            ir::Loc::Mem(ir::Mem { offset, .. }) => Loc::Mem(Mem {
+                word_len: WordLen::Qword,
+                base: RAX,
+                index: None,
+                displacement: Some(*offset as isize),
+            }),
+        })
     }
 }
 
@@ -797,8 +823,8 @@ impl Quadruple {
                 match un_op_type {
                     UnOpType::Not => Instr::Not(RAX).emit(out)?,
                     UnOpType::Neg => Instr::Neg(Loc::Reg(RAX)).emit(out)?,
-                    UnOpType::Inc => Instr::Inc(Loc::Reg(RAX)).emit(out)?,
-                    UnOpType::Dec => Instr::Dec(Loc::Reg(RAX)).emit(out)?,
+                    // UnOpType::Inc => Instr::Inc(Loc::Reg(RAX)).emit(out)?,
+                    // UnOpType::Dec => Instr::Dec(Loc::Reg(RAX)).emit(out)?,
                 }
                 Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
@@ -890,8 +916,55 @@ impl Quadruple {
 
             Quadruple::ArrLoad(_, _, _) => todo!(),
             Quadruple::ArrStore(_, _, _) => todo!(),
-            Quadruple::DerefLoad(_, _, _) => todo!(),
-            Quadruple::DerefStore(_, _, _) => todo!(),
+
+            Quadruple::DerefLoad(dst, ptr) => {
+                Instr::MovToReg(
+                    RAX,
+                    Val::Mem(frame.get_variable_mem(ptr.base, state.rsp_displacement)),
+                )
+                .emit(out)?;
+                Instr::MovToReg(
+                    RAX,
+                    Val::Mem(Mem {
+                        word_len: WordLen::Qword,
+                        base: RAX,
+                        index: None,
+                        displacement: Some(ptr.offset as isize),
+                    }),
+                )
+                .emit(out)?;
+                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                    .emit(out)?;
+            }
+
+            Quadruple::DerefStore(src, ptr) => {
+                // src in RAX, ptr in RDX
+                Instr::MovToReg(RAX, frame.get_val(*src, state.rsp_displacement)).emit(out)?;
+                Instr::MovToReg(
+                    RDX,
+                    Val::Mem(frame.get_variable_mem(ptr.base, state.rsp_displacement)),
+                )
+                .emit(out)?;
+                let ptr_mem = Mem {
+                    word_len: WordLen::Qword,
+                    base: RDX,
+                    index: None,
+                    displacement: Some(ptr.offset as isize),
+                };
+                Instr::MovToMem(ptr_mem, RAX).emit(out)?;
+            }
+
+            Quadruple::InPlaceUnOp(op, ir_loc) => {
+                let loc = Loc::new_from_ir_loc(out, frame, state, ir_loc)?;
+                match op {
+                    ir::InPlaceUnOpType::Inc => Instr::Inc(loc).emit(out)?,
+                    ir::InPlaceUnOpType::Dec => Instr::Dec(loc).emit(out)?,
+                }
+                if let ir::Loc::Var(var) = ir_loc {
+                    Instr::MovToMem(frame.get_variable_mem(*var, state.rsp_displacement), RAX)
+                        .emit(out)?;
+                }
+            }
         };
         Ok(())
     }
@@ -902,6 +975,7 @@ fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame
         writeln!(out, "extern {}", func)?;
     }
     writeln!(out, "extern {}", CONCAT_STRINGS_FUNC)?;
+    writeln!(out, "extern {}", NEW_FUNC)?;
 
     writeln!(out, "\nglobal main\n")?;
 

@@ -1,4 +1,5 @@
 use antlr_rust::token::GenericToken;
+use enum_as_inner::EnumAsInner;
 use smallvec::SmallVec;
 use std::{
     borrow::Cow,
@@ -212,7 +213,7 @@ impl NonvoidType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, EnumAsInner)]
 pub enum DataType {
     TVoid,
     TExit,

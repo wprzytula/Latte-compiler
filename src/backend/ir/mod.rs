@@ -1,7 +1,7 @@
 mod gen;
 mod opts;
 
-pub(crate) use gen::{CONCAT_STRINGS_FUNC, REAL_MAIN};
+pub(crate) use gen::{CONCAT_STRINGS_FUNC, NEW_FUNC, REAL_MAIN};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -45,11 +45,24 @@ impl Deref for Instant {
     }
 }
 
-#[derive(Debug)]
-pub enum Label {
-    Num(usize),
-    Func(Ident),
-    Method(Ident, Ident),
+#[derive(Debug, Clone, Copy)]
+pub struct Mem {
+    pub base: Var,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Loc {
+    Var(Var),
+    Mem(Mem),
+}
+impl Loc {
+    pub fn var(&self) -> Var {
+        match self {
+            Loc::Var(var) => *var,
+            Loc::Mem(mem) => mem.base,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -79,6 +92,10 @@ impl BinOpType {
 pub enum UnOpType {
     Not,
     Neg,
+}
+
+#[derive(Debug)]
+pub enum InPlaceUnOpType {
     Inc,
     Dec,
 }
@@ -158,7 +175,7 @@ impl From<NonvoidType> for VarType {
             NonvoidType::TInt => VarType::INT,
             NonvoidType::TString => VarType::STRING,
             NonvoidType::TBoolean => VarType::BOOL,
-            NonvoidType::TClass(_) => todo!(),
+            NonvoidType::TClass(name) => VarType::Ptr(PtrVarType::Class(name)),
             NonvoidType::TIntArr => todo!(),
             NonvoidType::TStringArr => todo!(),
             NonvoidType::TBooleanArr => todo!(),
@@ -172,6 +189,7 @@ pub enum Quadruple {
     BinOp(Var, Var, BinOpType, Value), // dst, op1, op, op2
     RelOp(Var, Var, RelOpType, Value), // dst, op1, op, op2
     UnOp(Var, UnOpType, Value),        // dst, op,
+    InPlaceUnOp(InPlaceUnOpType, Loc),
 
     Copy(Var, Var),
     Set(Var, Instant),
@@ -182,8 +200,8 @@ pub enum Quadruple {
     ArrLoad(Var, Var, Value),  // (dst, arr, idx)
     ArrStore(Var, Value, Var), // (arr, idx, src)
 
-    DerefLoad(Var, Var, usize),    // (dst, ptr, offset)
-    DerefStore(Value, Var, usize), // (src, ptr, offset)
+    DerefLoad(Var, Mem),    // (dst, ptr)
+    DerefStore(Value, Mem), // (src, ptr)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

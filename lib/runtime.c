@@ -44,9 +44,9 @@ char* readString() {
     return dst;
 }
 
-static char* __alloc_string(unsigned long long len) {
-    // fprintf(stderr, "Allocating string for len %lli\n", len);
-    char *const str = malloc(len + sizeof(unsigned long long));
+char* __new(unsigned long long len) {
+    // fprintf(stderr, "Allocating space for len %lli\n", len);
+    char *const str = malloc(len);
     if (!str) {
         fprintf(stderr, "RUNTIME: malloc returned NULL; terminating.\n");
         exit(1);
@@ -61,7 +61,7 @@ char* __concat_strings(char const*const restrict str1, char const*const restrict
     unsigned long long const len2 = *(unsigned long long*)str2;
     // fprintf(stderr, "str2: len %lli, contents: \"%.*s\"\n", len2, (int)len2, str2 + sizeof(unsigned long long));
     unsigned long long const len3 = len1 + len2;
-    char *const str3 = __alloc_string(len3);
+    char *const str3 = __new(len3 + sizeof(long long));
     *(unsigned long long*)str3 = len3;
     char* str3_writer = str3 + sizeof(unsigned long long);
     memcpy(str3_writer, str1 + sizeof(unsigned long long), len1);
