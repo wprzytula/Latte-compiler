@@ -8,7 +8,7 @@ pub(super) use self::state::State;
 use super::*;
 
 fn mangle_method(name: &str, class: &str) -> Ident {
-    Ident::from(format!("{}__{}", name, class))
+    Ident::from(format!("{}__{}", class, name))
 }
 
 pub(crate) const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
@@ -393,11 +393,10 @@ mod state {
             )
         }
 
-        pub(crate) fn enter_new_frame_and_give_params(
+        pub(crate) fn declare_and_give_params(
             &mut self,
             params: impl Iterator<Item = (Ident, NonvoidType)>,
         ) -> Vec<Var> {
-            self.var_location = Map::new();
             params
                 .map(|(param_name, param_type)| {
                     let var = self.fresh_reg(param_type.into());
@@ -408,6 +407,7 @@ mod state {
         }
 
         pub(crate) fn declare_var(&mut self, id: Ident, var: Var) {
+            eprintln!("Declared var: {} -> {:?}", &id, var);
             self.var_location.insert_mut(id, var);
         }
 
@@ -415,7 +415,7 @@ mod state {
             *self
                 .var_location
                 .get(id)
-                .unwrap_or_else(|| panic!("No var {} declared.", id))
+                .unwrap_or_else(|| panic!("Var \"{}\" not declared.", id))
         }
 
         pub(crate) fn register_literal(&mut self, string: String) -> StringLiteral {
@@ -461,16 +461,7 @@ impl Program {
                 .as_ref()
                 .map(|base| state.register_class_if_not_yet_registered(base.clone()));
 
-            let mut class = Class::new(class_idx, base_idx);
-            for class_item in class_items {
-                match class_item {
-                    ClassItem::Field(_, typ, name) => {
-                        class.add_field(name.clone(), typ.clone().into());
-                    }
-                    ClassItem::Method(_) => (), // not yet
-                }
-            }
-            cfg.classes.push(class);
+            cfg.classes.push(Class::new(class_idx, base_idx));
         }
 
         for ClassDef {
@@ -480,15 +471,29 @@ impl Program {
             ..
         } in self.1.iter()
         {
+            let state: &mut State = &mut state.new_scope();
             let class_idx = state.retrieve_class_idx(class_name);
+
+            // Add fields to variable env
+            for class_item in class_items {
+                match class_item {
+                    ClassItem::Field(_, typ, field_name) => {
+                        cfg.classes[class_idx.0].add_field(field_name.clone(), typ.clone().into());
+                        let var = state.fresh_reg(typ.clone().into());
+                        state.declare_var(field_name.clone(), var);
+                    }
+                    ClassItem::Method(_) => (), // not yet
+                }
+            }
+
             for class_item in class_items {
                 match class_item {
                     ClassItem::Field(_, _, _) => (), // already covered
                     ClassItem::Method(method) => {
-                        let method_name = mangle_method(&method.name, &class_name);
+                        let mangled_name = mangle_method(&method.name, &class_name);
                         cfg.classes[class_idx.0]
                             .methods
-                            .insert(method.name.clone(), method_name.clone());
+                            .insert(method.name.clone(), mangled_name.clone());
                         // let params = iter::once(NonvoidType::TClass(class_name.clone())).chain(
                         //     method.params.iter().map(|p| p.type_.clone())).collect::<Vec<_>>();
 
@@ -501,21 +506,25 @@ impl Program {
                             fun_type
                         };
                         let this_var = state.fresh_reg(VarType::class(class_name.clone()));
-                        let mut param_vars = state.enter_new_frame_and_give_params(
+                        let mut param_vars = state.declare_and_give_params(
                             method
                                 .params
                                 .iter()
                                 .map(|param| (param.name.clone(), param.type_.clone())),
                         );
                         param_vars.push(this_var);
-                        cfg.new_function(method_name, method_type, param_vars);
+
+                        cfg.new_function(mangled_name, method_type, param_vars);
+
+                        eprintln!("\nEmitting IR for method: {}:{}", class_name, &method.name);
+                        method.block.ir(&mut cfg, &mut state.new_scope());
                     }
                 }
             }
         }
 
         for func in self.0.iter() {
-            let param_vars = state.enter_new_frame_and_give_params(
+            let param_vars = state.declare_and_give_params(
                 func.params
                     .iter()
                     .map(|param| (param.name.clone(), param.type_.clone())),
@@ -537,10 +546,11 @@ impl Program {
 }
 
 impl Block {
-    fn ir(&self, cfg: &mut CFG, state: &mut State) {
-        for stmt in &self.1 {
-            stmt.ir(cfg, state)
-        }
+    fn ir(&self, cfg: &mut CFG, state: &mut State) -> bool {
+        self.1
+            .iter()
+            .map(|stmt| stmt.ir(cfg, state))
+            .any(|definitive_return| definitive_return)
     }
 }
 
@@ -572,10 +582,12 @@ impl<'a> ValueFut<'a> {
 }
 
 impl Stmt {
-    fn ir(&self, cfg: &mut CFG, state: &mut State) {
+    fn ir(&self, cfg: &mut CFG, state: &mut State) -> bool {
         match &self.1 {
-            StmtInner::Empty => (),
+            StmtInner::Empty => false,
+
             StmtInner::Block(block) => block.ir(cfg, &mut state.new_scope()),
+
             StmtInner::VarDecl(decls) => {
                 for decl in decls.decls.iter() {
                     let var = state.fresh_reg(decls.type_.clone().into());
@@ -598,7 +610,9 @@ impl Stmt {
                     }
                     state.declare_var(decl.name.clone(), var);
                 }
+                false
             }
+
             StmtInner::Ass(lval, rval) => {
                 let rval_fut = rval.ir_fut();
                 let loc = lval.ir(cfg, state, None);
@@ -614,19 +628,25 @@ impl Stmt {
                     }
                 };
                 cfg.current_mut().quadruples.push(quadruple);
+                false
             }
+
             StmtInner::Incr(lval) => {
                 let lval = lval.ir(cfg, state, None);
                 cfg.current_mut()
                     .quadruples
                     .push(Quadruple::InPlaceUnOp(InPlaceUnOpType::Inc, lval));
+                false
             }
+
             StmtInner::Decr(lval) => {
                 let lval = lval.ir(cfg, state, None);
                 cfg.current_mut()
                     .quadruples
                     .push(Quadruple::InPlaceUnOp(InPlaceUnOpType::Dec, lval));
+                false
             }
+
             StmtInner::Return(expr) => {
                 let reg = expr.ir_fut().ir(cfg, state, None);
                 eprintln!(
@@ -634,13 +654,11 @@ impl Stmt {
                     cfg.current_block_idx.0, reg
                 );
                 cfg.current_mut().set_end_type(EndType::Return(Some(reg)));
-                let bl = cfg.new_block(BasicBlockKind::AfterReturn);
-                cfg.make_current(bl, "Return");
+                true
             }
             StmtInner::VoidReturn => {
                 cfg.current_mut().set_end_type(EndType::Return(None));
-                let bl = cfg.new_block(BasicBlockKind::AfterReturn);
-                cfg.make_current(bl, "Void return");
+                true
             }
 
             StmtInner::Cond(cond, then) => {
@@ -650,6 +668,7 @@ impl Stmt {
                         if *i == 0 {
                             // condition always false
                             // skip
+                            false
                         } else {
                             // condition always true
                             then.ir(cfg, state)
@@ -684,6 +703,8 @@ impl Stmt {
                         cfg[then_block]
                             .end_type
                             .get_or_insert(EndType::Goto(next_block));
+
+                        false
                     }
                 }
             }
@@ -720,10 +741,10 @@ impl Stmt {
                         .unwrap_err(); // we should not return any var from the cond
 
                         cfg.make_current(then_block, "CondElse then");
-                        then.ir(cfg, state);
+                        let then_definitive_return = then.ir(cfg, state);
 
                         cfg.make_current(else_block, "CondElse else");
-                        else_br.ir(cfg, state);
+                        let else_definitive_return = else_br.ir(cfg, state);
 
                         // FIXME: this should be set inside cond
                         // cfg[pre_block].end_type =
@@ -735,12 +756,15 @@ impl Stmt {
                             .end_type
                             .get_or_insert(EndType::Goto(next_block));
                         cfg.make_current(next_block, "CondElse next");
+
+                        then_definitive_return && else_definitive_return
                     }
                 }
             }
 
             StmtInner::SExp(expr) => {
                 let _ = expr.ir_fut().ir(cfg, state, None);
+                false
             }
 
             StmtInner::While(cond, body) => {
@@ -751,6 +775,7 @@ impl Stmt {
                         if *i == 0 {
                             // condition always false
                             // skip
+                            false
                         } else {
                             // condition always true
                             // make infinite loop in a new block
@@ -759,6 +784,8 @@ impl Stmt {
                             cfg[loop_block].set_end_type(EndType::Goto(loop_block));
                             cfg.make_current(loop_block, "While infinite loop");
                             body.ir(cfg, state);
+
+                            true // never escapes
                         }
                     }
                     ValueFut::VariableFut(cond) => {
@@ -787,9 +814,7 @@ impl Stmt {
                         cfg.current_mut().set_end_type(EndType::Goto(cond_block));
 
                         cfg.make_current(next_block, "While next");
-                        // FIXME: this should be set inside cond
-                        // cfg[cond_block].end_type =
-                        //     Some(EndType::IfElse(cond_var, loop_block, next_block));
+                        false
                     }
                 }
             }
@@ -947,7 +972,7 @@ impl Expr {
                 },
             },
             ExprInner::LVal(_) => None,
-            ExprInner::Null(_) => None,
+            ExprInner::Null(i) => Some(Instant(0)),
         } {
             Some(i) => ValueFut::Instant(i),
             None => ValueFut::VariableFut(self),
@@ -1221,14 +1246,13 @@ impl Expr {
                 Some(reg)
             }
 
-            ExprInner::Null(typ) => {
-                let reg = state.fresh_reg(typ.clone().into());
-                cfg.current_mut()
-                    .quadruples
-                    .push(Quadruple::Set(reg, Instant(0)));
-                Some(reg)
-            }
-
+            ExprInner::Null(_typ) => unreachable!("Impossible instants"), /* {
+            let reg = state.fresh_reg(typ.clone().into());
+            cfg.current_mut()
+            .quadruples
+            .push(Quadruple::Set(reg, Instant(0)));
+            Some(reg)
+            } */
             ExprInner::LVal(lval) => {
                 let loc = lval.ir(cfg, state, None);
                 let var = match loc {
@@ -1343,7 +1367,17 @@ impl LVal {
                     args.len(),
                     cfg.functions.get(&mangled_name).unwrap().params.len()
                 );
-                let retvar = state.fresh_reg(typ);
+                let rettype = cfg
+                    .functions
+                    .get(&mangled_name)
+                    .unwrap()
+                    .typ
+                    .ret_type
+                    .clone()
+                    .into_nonvoid()
+                    .unwrap_or(NonvoidType::TInt)
+                    .into();
+                let retvar = state.fresh_reg(rettype);
                 cfg.current_mut()
                     .quadruples
                     .push(Quadruple::Call(retvar, mangled_name, args));
