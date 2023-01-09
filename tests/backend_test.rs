@@ -46,6 +46,21 @@ fn lattests_compile_structs() {
     lattests_compile(&["lattests/extensions/struct"]);
 }
 
+#[test]
+fn lattests_compile_classes() {
+    lattests_compile(&["lattests/extensions/objects1"]);
+}
+
+#[test]
+fn lattests_compile_arrays() {
+    lattests_compile(&["lattests/extensions/arrays1"]);
+}
+
+#[test]
+fn lattests_compile_virtual_methods() {
+    lattests_compile(&["lattests/extensions/objects2"]);
+}
+
 fn lattests_compile(good_paths: &[&str]) {
     let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
 

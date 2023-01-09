@@ -7,9 +7,8 @@ pub(super) use self::state::State;
 
 use super::*;
 
-#[allow(unused)]
-fn mangle_method(name: &Ident, class: &Ident) -> Ident {
-    Ident::from(format!("{}${}", name, class))
+fn mangle_method(name: &str, class: &str) -> Ident {
+    Ident::from(format!("{}__{}", name, class))
 }
 
 pub(crate) const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
@@ -54,6 +53,7 @@ impl CFG {
                             .map(|typ| state.fresh_reg(typ.clone().into()))
                             .collect(),
                         typ: fun_type,
+                        this: None,
                     },
                 )
             })
@@ -82,6 +82,7 @@ impl CFG {
                     entry: Some(entry),
                     typ: fun_type,
                     params: param_vars,
+                    this: None,
                 },
             )
             .ok_or(())
@@ -175,6 +176,23 @@ impl CFG {
             }
             Some(EndType::Return(_)) | None => (), // function end,
         };
+    }
+
+    fn resolve_method_base(
+        &self,
+        mut current_class: ClassIdx,
+        method: &Ident,
+    ) -> (ClassIdx, Ident) {
+        loop {
+            if let Some(mangled_name) = self.classes[current_class.0].methods.get(method) {
+                return (current_class, mangled_name.clone());
+            } else {
+                match self.classes[current_class.0].base_idx {
+                    None => unreachable!(),
+                    Some(base_class) => current_class = base_class,
+                }
+            }
+        }
     }
 }
 
@@ -306,10 +324,10 @@ mod state {
 
     impl Drop for StateGuard<'_> {
         fn drop(&mut self) {
-            // self.0.next_label_num = self.1.next_label_num;
             self.0.next_var_num = self.1.next_var_num;
             std::mem::swap(&mut self.0.string_literals, &mut self.1.string_literals);
             std::mem::swap(&mut self.0.var_types, &mut self.1.var_types);
+            std::mem::swap(&mut self.0.class_mapping, &mut self.1.class_mapping);
         }
     }
 
@@ -405,16 +423,23 @@ mod state {
             StringLiteral(self.string_literals.len() - 1)
         }
 
-        pub(crate) fn register_class(&mut self, class: Ident) -> ClassIdx {
-            eprintln!("Registered class {}", &class);
-            let class_idx = ClassIdx(self.next_class_num);
-            self.next_class_num += 1;
-            self.class_mapping.insert(class, class_idx);
-            class_idx
+        pub(crate) fn register_class_if_not_yet_registered(&mut self, class: Ident) -> ClassIdx {
+            if let Some(idx) = self.class_mapping.get(&class) {
+                *idx
+            } else {
+                eprintln!("Registered class {}", &class);
+                let class_idx = ClassIdx(self.next_class_num);
+                self.next_class_num += 1;
+                self.class_mapping.insert(class, class_idx);
+                class_idx
+            }
         }
 
         pub(crate) fn retrieve_class_idx(&self, class: &Ident) -> ClassIdx {
-            *self.class_mapping.get(class).unwrap()
+            *self
+                .class_mapping
+                .get(class)
+                .unwrap_or_else(|| panic!("Class {} not registered", class))
         }
     }
 }
@@ -431,18 +456,62 @@ impl Program {
             ..
         } in self.1.iter()
         {
-            assert!(base_class.is_none()); // for now, only structs
-            let class_idx = state.register_class(class.clone());
-            let mut class = Class::new(class_idx);
+            let class_idx = state.register_class_if_not_yet_registered(class.clone());
+            let base_idx = base_class
+                .as_ref()
+                .map(|base| state.register_class_if_not_yet_registered(base.clone()));
+
+            let mut class = Class::new(class_idx, base_idx);
             for class_item in class_items {
                 match class_item {
                     ClassItem::Field(_, typ, name) => {
                         class.add_field(name.clone(), typ.clone().into());
                     }
-                    ClassItem::Method(_) => unimplemented!("Not yet supported"),
+                    ClassItem::Method(_) => (), // not yet
                 }
             }
             cfg.classes.push(class);
+        }
+
+        for ClassDef {
+            class: class_name,
+            base_class: _,
+            class_block: ClassBlock(class_items),
+            ..
+        } in self.1.iter()
+        {
+            let class_idx = state.retrieve_class_idx(class_name);
+            for class_item in class_items {
+                match class_item {
+                    ClassItem::Field(_, _, _) => (), // already covered
+                    ClassItem::Method(method) => {
+                        let method_name = mangle_method(&method.name, &class_name);
+                        cfg.classes[class_idx.0]
+                            .methods
+                            .insert(method.name.clone(), method_name.clone());
+                        // let params = iter::once(NonvoidType::TClass(class_name.clone())).chain(
+                        //     method.params.iter().map(|p| p.type_.clone())).collect::<Vec<_>>();
+
+                        // `this` is added as the last parameter in IrFunction
+                        let method_type = {
+                            let mut fun_type = method.fun_type();
+                            fun_type
+                                .params
+                                .push(NonvoidType::TClass(class_name.clone()));
+                            fun_type
+                        };
+                        let this_var = state.fresh_reg(VarType::class(class_name.clone()));
+                        let mut param_vars = state.enter_new_frame_and_give_params(
+                            method
+                                .params
+                                .iter()
+                                .map(|param| (param.name.clone(), param.type_.clone())),
+                        );
+                        param_vars.push(this_var);
+                        cfg.new_function(method_name, method_type, param_vars);
+                    }
+                }
+            }
         }
 
         for func in self.0.iter() {
@@ -1163,14 +1232,14 @@ impl Expr {
             ExprInner::LVal(lval) => {
                 let loc = lval.ir(cfg, state, None);
                 let var = match loc {
-                Loc::Var(var) => var,
-                Loc::Mem(mem) => {
-                    let var = state.fresh_reg(lval.typ().unwrap());
-                    cfg.current_mut()
-                        .quadruples
-                        .push(Quadruple::DerefLoad(var, mem));
-                    var
-                }
+                    Loc::Var(var) => var,
+                    Loc::Mem(mem) => {
+                        let var = state.fresh_reg(lval.typ().unwrap());
+                        cfg.current_mut()
+                            .quadruples
+                            .push(Quadruple::DerefLoad(var, mem));
+                        var
+                    }
                 };
                 finish_cond_ctx_leaf(cfg, state, var, cond_ctx, "Expr LVal")
             }
@@ -1282,10 +1351,10 @@ impl LVal {
             }
 
             LValInner::New(typ) => match typ {
-                    NewType::TClass(name) => {
-                        let class_idx = state.retrieve_class_idx(name);
-                        let class_size = cfg.classes[class_idx.0].size;
-                        let var = state.fresh_reg(VarType::class(name.clone()));
+                NewType::TClass(name) => {
+                    let class_idx = state.retrieve_class_idx(name);
+                    let class_size = cfg.classes[class_idx.0].size;
+                    let var = state.fresh_reg(VarType::class(name.clone()));
                     cfg.current_mut().quadruples.push(Quadruple::Call(
                         var,
                         NEW_FUNC.into(),

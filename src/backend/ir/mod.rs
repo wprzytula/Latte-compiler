@@ -225,6 +225,7 @@ pub struct IrFunction {
     pub entry: Option<BasicBlockIdx>,
     pub typ: FunType,
     pub params: Vec<Var>,
+    pub this: Option<Var>, // Only for classes
 }
 
 #[derive(Debug)]
@@ -304,15 +305,17 @@ pub struct Class {
     base_idx: Option<ClassIdx>,
     pub size: usize, // num elems, TODO: for virtual classes add VST size
     pub fields: VecMap<Ident, Field>,
+    pub methods: VecMap<Ident, Ident>,
 }
 
 impl Class {
-    fn new(idx: ClassIdx) -> Self {
+    fn new(idx: ClassIdx, base_idx: Option<ClassIdx>) -> Self {
         Self {
             _idx: idx,
-            base_idx: None,
+            base_idx,
             size: 0,
             fields: VecMap::new(),
+            methods: VecMap::new(),
         }
     }
 
