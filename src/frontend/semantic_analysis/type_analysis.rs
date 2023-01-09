@@ -1240,13 +1240,6 @@ impl Expr {
                 }
             },
 
-            ExprInner::Id(id) => {
-                let var_type = env
-                    .get_variable_type(id)
-                    .map_err(|_| TypeCheckError::UndeclaredVariableAccess(pos, id.clone()))?;
-                Ok((var_type.clone().into(), None))
-            }
-
             ExprInner::Null(nonvoid) => {
                 if match nonvoid {
                     NonvoidType::TClass(class) => env.get_class(class).is_ok(),

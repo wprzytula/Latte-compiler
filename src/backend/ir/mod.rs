@@ -233,6 +233,7 @@ pub struct CFG {
     pub blocks: Vec<BasicBlock>,
     current_block_idx: BasicBlockIdx,
     current_func: Ident,
+    current_class: Option<ClassIdx>,
     pub functions: HashMap<Ident, IrFunction>,
     pub classes: Vec<Class>,
 }

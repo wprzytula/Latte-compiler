@@ -370,7 +370,6 @@ impl Expr {
 #[derive(Debug, Clone)]
 pub enum ExprInner {
     Op(Op),
-    Id(Ident),
     IntLit(Int),
     BoolLit(bool),
     StringLit(String),

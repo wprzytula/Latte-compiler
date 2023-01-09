@@ -65,10 +65,11 @@ impl CFG {
             current_func: Ident::new(),
             functions: built_in_functions,
             classes: vec![],
+            current_class: None,
         }
     }
 
-    fn new_function(&mut self, mut id: Ident, fun_type: FunType, param_vars: Vec<Var>) {
+    fn new_function(&mut self, mut id: Ident, fun_type: FunType, param_vars: Vec<Var>, this: Option<Var>) {
         if id == "main" {
             id = REAL_MAIN.into();
         }
@@ -82,7 +83,7 @@ impl CFG {
                     entry: Some(entry),
                     typ: fun_type,
                     params: param_vars,
-                    this: None,
+                    this,
                 },
             )
             .ok_or(())
@@ -344,6 +345,12 @@ mod state {
         }
     }
 
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) enum VariableKind {
+        StackVar,
+        ClassField,
+    }
+
     pub struct State {
         /* state-like flow */
         pub string_literals: Vec<String>,
@@ -353,7 +360,7 @@ mod state {
         class_mapping: VecMap<Ident, ClassIdx>,
 
         /* env-like flow */
-        var_location: Map<Ident, Var>,
+        var_location: Map<Ident, (Var, VariableKind)>,
     }
     impl State {
         pub(crate) fn new() -> Self {
@@ -400,18 +407,18 @@ mod state {
             params
                 .map(|(param_name, param_type)| {
                     let var = self.fresh_reg(param_type.into());
-                    self.declare_var(param_name, var);
+                    self.declare_var(param_name, var, VariableKind::StackVar);
                     var
                 })
                 .collect()
         }
 
-        pub(crate) fn declare_var(&mut self, id: Ident, var: Var) {
+        pub(crate) fn declare_var(&mut self, id: Ident, var: Var, variable_kind: VariableKind) {
             eprintln!("Declared var: {} -> {:?}", &id, var);
-            self.var_location.insert_mut(id, var);
+            self.var_location.insert_mut(id, (var, variable_kind));
         }
 
-        pub(crate) fn retrieve_var(&mut self, id: &Ident) -> Var {
+        pub(crate) fn retrieve_var(&mut self, id: &Ident) -> (Var, VariableKind) {
             *self
                 .var_location
                 .get(id)
@@ -450,10 +457,7 @@ impl Program {
         let mut cfg = CFG::new(&mut state);
 
         for ClassDef {
-            class,
-            base_class,
-            class_block: ClassBlock(class_items),
-            ..
+            class, base_class, ..
         } in self.1.iter()
         {
             let class_idx = state.register_class_if_not_yet_registered(class.clone());
@@ -466,7 +470,6 @@ impl Program {
 
         for ClassDef {
             class: class_name,
-            base_class: _,
             class_block: ClassBlock(class_items),
             ..
         } in self.1.iter()
@@ -480,12 +483,13 @@ impl Program {
                     ClassItem::Field(_, typ, field_name) => {
                         cfg.classes[class_idx.0].add_field(field_name.clone(), typ.clone().into());
                         let var = state.fresh_reg(typ.clone().into());
-                        state.declare_var(field_name.clone(), var);
+                        state.declare_var(field_name.clone(), var, state::VariableKind::ClassField);
                     }
                     ClassItem::Method(_) => (), // not yet
                 }
             }
 
+            cfg.current_class = Some(class_idx);
             for class_item in class_items {
                 match class_item {
                     ClassItem::Field(_, _, _) => (), // already covered
@@ -514,7 +518,7 @@ impl Program {
                         );
                         param_vars.push(this_var);
 
-                        cfg.new_function(mangled_name, method_type, param_vars);
+                        cfg.new_function(mangled_name, method_type, param_vars, Some(this_var));
 
                         eprintln!("\nEmitting IR for method: {}:{}", class_name, &method.name);
                         method.block.ir(&mut cfg, &mut state.new_scope());
@@ -522,6 +526,7 @@ impl Program {
                 }
             }
         }
+        cfg.current_class = None;
 
         for func in self.0.iter() {
             let param_vars = state.declare_and_give_params(
@@ -529,7 +534,7 @@ impl Program {
                     .iter()
                     .map(|param| (param.name.clone(), param.type_.clone())),
             );
-            cfg.new_function(func.name.clone(), func.fun_type(), param_vars);
+            cfg.new_function(func.name.clone(), func.fun_type(), param_vars, None);
             eprintln!("\nEmitting IR for function: {}", &func.name);
             func.block.ir(&mut cfg, &mut state);
         }
@@ -608,7 +613,7 @@ impl Stmt {
                             .quadruples
                             .push(Quadruple::Set(var, Instant(0)))
                     }
-                    state.declare_var(decl.name.clone(), var);
+                    state.declare_var(decl.name.clone(), var, state::VariableKind::StackVar);
                 }
                 false
             }
@@ -873,7 +878,6 @@ impl<'a> fmt::Debug for DebugExprInner<'a> {
                 },
                 Op::LogOp(op, _, _) => write!(f, "{:?}", op),
             },
-            ExprInner::Id(_) => f.debug_struct("Id").finish_non_exhaustive(),
             ExprInner::IntLit(_) => f.debug_struct("IntLit").finish_non_exhaustive(),
             ExprInner::BoolLit(_) => f.debug_struct("BoolLit").finish_non_exhaustive(),
             ExprInner::StringLit(_) => f.debug_struct("StringLit").finish_non_exhaustive(),
@@ -920,7 +924,6 @@ impl Expr {
     fn ir_fut(&self) -> ValueFut {
         eprintln!("ir_fut of {:#?}", &self.debug_surface());
         match match &self.1 {
-            ExprInner::Id(_) => None,
             ExprInner::IntLit(i) => Some(Instant(*i)),
             ExprInner::BoolLit(b) => Some(Instant::bool(*b)),
             ExprInner::StringLit(_) => None,
@@ -972,7 +975,7 @@ impl Expr {
                 },
             },
             ExprInner::LVal(_) => None,
-            ExprInner::Null(i) => Some(Instant(0)),
+            ExprInner::Null(_) => Some(Instant(0)),
         } {
             Some(i) => ValueFut::Instant(i),
             None => ValueFut::VariableFut(self),
@@ -1228,11 +1231,6 @@ impl Expr {
                 }
             },
 
-            ExprInner::Id(id) => {
-                let var = state.retrieve_var(id);
-                finish_cond_ctx_leaf(cfg, state, var, cond_ctx, "Expr Id")
-            }
-
             ExprInner::IntLit(_) => unreachable!("Impossible instants"),
 
             ExprInner::BoolLit(_) => unreachable!("Impossible instants"),
@@ -1282,13 +1280,32 @@ impl LVal {
     }
 
     fn ir(&self, cfg: &mut CFG, state: &mut State, cond_ctx: Option<ConditionalContext>) -> Loc {
-        let typ = if let DataType::Nonvoid(nonvoid) = self.2.borrow().as_ref().unwrap() {
-            Some(nonvoid.clone().into())
-        } else {
-            None
-        };
+        let typ = self.typ();
         match &self.1 {
-            LValInner::Id(var_id) => Loc::Var(state.retrieve_var(var_id)),
+            LValInner::Id(var_id) => {
+                let (var, var_kind) = state.retrieve_var(var_id);
+                let loc = match var_kind {
+                    state::VariableKind::StackVar => Loc::Var(var),
+                    state::VariableKind::ClassField => {
+                        let current_class_idx = cfg.current_class.unwrap();
+                        let this_var = {
+                            let current_func = &cfg.current_func;
+                            cfg.functions.get(current_func).unwrap().this.unwrap()
+                        };
+                        let offset = cfg.classes[current_class_idx.0]
+                            .fields
+                            .get(var_id)
+                            .unwrap()
+                            .offset;
+                        Loc::Mem(Mem {
+                            base: this_var,
+                            offset,
+                        })
+                    }
+                };
+                loc
+            }
+
             LValInner::FunCall { name, args } => {
                 let args = args
                     .iter()
