@@ -46,12 +46,12 @@ char* readString() {
 
 char* __new(unsigned long long len) {
     // fprintf(stderr, "Allocating space for len %lli\n", len);
-    char *const str = malloc(len);
-    if (!str) {
-        fprintf(stderr, "RUNTIME: malloc returned NULL; terminating.\n");
+    char *const mem = calloc(1, len);
+    if (!mem) {
+        fprintf(stderr, "RUNTIME: calloc returned NULL; terminating.\n");
         exit(1);
     }
-    return str;
+    return mem;
 }
 
 char* __concat_strings(char const*const restrict str1, char const*const restrict str2) {

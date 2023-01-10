@@ -1432,7 +1432,7 @@ impl LVal {
                     cfg.current_mut().quadruples.push(Quadruple::Call(
                         var,
                         NEW_FUNC.into(),
-                        vec![Value::Instant(Instant(class_size as i64))],
+                        vec![Value::Instant(Instant((class_size * QUADWORD_SIZE) as i64))],
                     ));
                     Loc::Var(var)
                 }
