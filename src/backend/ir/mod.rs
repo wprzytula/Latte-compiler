@@ -225,7 +225,7 @@ pub struct IrFunction {
     pub entry: Option<BasicBlockIdx>,
     pub typ: FunType,
     pub params: Vec<Var>,
-    pub this: Option<Var>, // Only for classes
+    pub self_var: Option<Var>, // Only for classes
 }
 
 #[derive(Debug)]

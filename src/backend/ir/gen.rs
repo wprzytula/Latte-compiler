@@ -3,6 +3,8 @@ use enum_as_inner::EnumAsInner;
 
 use std::{fmt, iter};
 
+use crate::backend::ir::gen::state::VariableKind;
+
 pub(super) use self::state::State;
 
 use super::*;
@@ -14,6 +16,7 @@ fn mangle_method(name: &str, class: &str) -> Ident {
 pub(crate) const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
 pub(crate) const REAL_MAIN: &str = "__real_main";
 pub(crate) const NEW_FUNC: &str = "__new";
+pub(crate) const SELF: &str = "self";
 
 impl CFG {
     /** Built-in functions:
@@ -53,7 +56,7 @@ impl CFG {
                             .map(|typ| state.fresh_reg(typ.clone().into()))
                             .collect(),
                         typ: fun_type,
-                        this: None,
+                        self_var: None,
                     },
                 )
             })
@@ -74,7 +77,7 @@ impl CFG {
         mut id: Ident,
         fun_type: FunType,
         param_vars: Vec<Var>,
-        this: Option<Var>,
+        self_var: Option<Var>,
     ) {
         if id == "main" {
             id = REAL_MAIN.into();
@@ -89,7 +92,7 @@ impl CFG {
                     entry: Some(entry),
                     typ: fun_type,
                     params: param_vars,
-                    this,
+                    self_var,
                 },
             )
             .ok_or(())
@@ -494,7 +497,7 @@ impl Program {
                 let base_fields = cfg.classes[base_class_idx.0].fields.clone();
                 for (field_name, field) in &base_fields {
                     let var = state.fresh_reg(field.typ.clone());
-                    state.declare_var(field_name.clone(), var, state::VariableKind::ClassField);
+                    state.declare_var(field_name.clone(), var, VariableKind::ClassField);
                 }
                 cfg.classes[class_idx.0].size += base_fields.len();
                 cfg.classes[class_idx.0].fields = base_fields;
@@ -506,7 +509,7 @@ impl Program {
                     ClassItem::Field(_, typ, field_name) => {
                         cfg.classes[class_idx.0].add_field(field_name.clone(), typ.clone().into());
                         let var = state.fresh_reg(typ.clone().into());
-                        state.declare_var(field_name.clone(), var, state::VariableKind::ClassField);
+                        state.declare_var(field_name.clone(), var, VariableKind::ClassField);
                     }
                     ClassItem::Method(_) => (), // not yet
                 }
@@ -532,19 +535,23 @@ impl Program {
                                 .push(NonvoidType::TClass(class_name.clone()));
                             fun_type
                         };
-                        let this_var = state.fresh_reg(VarType::class(class_name.clone()));
+                        let self_var = state.fresh_reg(VarType::class(class_name.clone()));
                         let mut param_vars = state.declare_and_give_params(
                             method
                                 .params
                                 .iter()
                                 .map(|param| (param.name.clone(), param.type_.clone())),
                         );
-                        param_vars.push(this_var);
+                        param_vars.push(self_var);
 
-                        cfg.new_function(mangled_name, method_type, param_vars, Some(this_var));
+                        cfg.new_function(mangled_name, method_type, param_vars, Some(self_var));
+
+                        let method_state = &mut state.new_scope();
+
+                        method_state.declare_var(SELF.into(), self_var, VariableKind::StackVar);
 
                         eprintln!("\nEmitting IR for method: {}:{}", class_name, &method.name);
-                        method.block.ir(&mut cfg, &mut state.new_scope());
+                        method.block.ir(&mut cfg, method_state);
                     }
                 }
             }
@@ -636,7 +643,7 @@ impl Stmt {
                             .quadruples
                             .push(Quadruple::Set(var, Instant(0)))
                     }
-                    state.declare_var(decl.name.clone(), var, state::VariableKind::StackVar);
+                    state.declare_var(decl.name.clone(), var, VariableKind::StackVar);
                 }
                 false
             }
@@ -1308,12 +1315,12 @@ impl LVal {
             LValInner::Id(var_id) => {
                 let (var, var_kind) = state.retrieve_var(var_id);
                 let loc = match var_kind {
-                    state::VariableKind::StackVar => Loc::Var(var),
-                    state::VariableKind::ClassField => {
+                    VariableKind::StackVar => Loc::Var(var),
+                    VariableKind::ClassField => {
                         let current_class_idx = cfg.current_class.unwrap();
                         let this_var = {
                             let current_func = &cfg.current_func;
-                            cfg.functions.get(current_func).unwrap().this.unwrap()
+                            cfg.functions.get(current_func).unwrap().self_var.unwrap()
                         };
                         let offset = cfg.classes[current_class_idx.0]
                             .fields
