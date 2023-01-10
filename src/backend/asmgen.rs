@@ -520,6 +520,9 @@ impl Frame {
 
 impl Ir {
     pub fn emit_assembly(&self, out: &mut impl Write) -> AsmGenResult {
+        eprintln!(
+            "\n\n#################################################\n---- ASSEMBLY EMITTING ----\n"
+        );
         self.cfg.emit_assembly(out, &self.string_literals)
     }
 }

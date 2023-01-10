@@ -294,7 +294,7 @@ pub struct BasicBlock {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ClassIdx(usize);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Field {
     offset: usize,
     typ: VarType,
@@ -302,6 +302,7 @@ pub struct Field {
 
 #[derive(Debug)]
 pub struct Class {
+    _name: Ident,
     _idx: ClassIdx,
     base_idx: Option<ClassIdx>,
     pub size: usize, // num elems, TODO: for virtual classes add VST size
@@ -310,8 +311,9 @@ pub struct Class {
 }
 
 impl Class {
-    fn new(idx: ClassIdx, base_idx: Option<ClassIdx>) -> Self {
+    fn new(name: Ident, idx: ClassIdx, base_idx: Option<ClassIdx>) -> Self {
         Self {
+            _name: name,
             _idx: idx,
             base_idx,
             size: 0,

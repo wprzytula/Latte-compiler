@@ -69,7 +69,13 @@ impl CFG {
         }
     }
 
-    fn new_function(&mut self, mut id: Ident, fun_type: FunType, param_vars: Vec<Var>, this: Option<Var>) {
+    fn new_function(
+        &mut self,
+        mut id: Ident,
+        fun_type: FunType,
+        param_vars: Vec<Var>,
+        this: Option<Var>,
+    ) {
         if id == "main" {
             id = REAL_MAIN.into();
         }
@@ -465,17 +471,34 @@ impl Program {
                 .as_ref()
                 .map(|base| state.register_class_if_not_yet_registered(base.clone()));
 
-            cfg.classes.push(Class::new(class_idx, base_idx));
+            cfg.classes
+                .push(Class::new(class.clone(), class_idx, base_idx));
         }
 
         for ClassDef {
             class: class_name,
             class_block: ClassBlock(class_items),
+            base_class,
             ..
         } in self.1.iter()
         {
             let state: &mut State = &mut state.new_scope();
             let class_idx = state.retrieve_class_idx(class_name);
+            let base_class_idx = base_class
+                .as_ref()
+                .map(|base| state.retrieve_class_idx(base));
+
+            // Add base class fields to variable env
+            // ASSUMPTION: Base class declared before derived
+            if let Some(base_class_idx) = base_class_idx {
+                let base_fields = cfg.classes[base_class_idx.0].fields.clone();
+                for (field_name, field) in &base_fields {
+                    let var = state.fresh_reg(field.typ.clone());
+                    state.declare_var(field_name.clone(), var, state::VariableKind::ClassField);
+                }
+                cfg.classes[class_idx.0].size += base_fields.len();
+                cfg.classes[class_idx.0].fields = base_fields;
+            }
 
             // Add fields to variable env
             for class_item in class_items {
@@ -922,7 +945,7 @@ impl Expr {
     }
 
     fn ir_fut(&self) -> ValueFut {
-        eprintln!("ir_fut of {:#?}", &self.debug_surface());
+        // eprintln!("ir_fut of {:#?}", &self.debug_surface());
         match match &self.1 {
             ExprInner::IntLit(i) => Some(Instant(*i)),
             ExprInner::BoolLit(b) => Some(Instant::bool(*b)),
@@ -988,11 +1011,11 @@ impl Expr {
         state: &mut State,
         cond_ctx: Option<ConditionalContext>,
     ) -> Option<Var> {
-        eprintln!(
-            "ir of {:#?} with cond_ctx {:?}",
-            &self.debug_surface(),
-            cond_ctx
-        );
+        // eprintln!(
+        //    "ir of {:#?} with cond_ctx {:?}",
+        //     &self.debug_surface(),
+        //     cond_ctx
+        // );
         let res = match &self.1 {
             ExprInner::Op(op) => match op {
                 Op::UnOp(un_op, expr) => match un_op {
