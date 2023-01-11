@@ -66,9 +66,10 @@ pub fn compile(path: impl AsRef<Path>) -> Result<(), CompilerError> {
     }
     let ast = Program::try_from(antlr_ast);
     let program = match ast {
-        Ok(program) => match program.type_check() {
+        Ok(mut program) => match program.type_check() {
             Ok(()) => {
                 eprintln!("OK");
+                program.topo_sort_classes();
                 program
             }
             Err(e) => {

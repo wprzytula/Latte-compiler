@@ -1,11 +1,13 @@
 use antlr_rust::token::GenericToken;
 use enum_as_inner::EnumAsInner;
+use hashbrown::HashMap;
 use smallvec::SmallVec;
 use std::{
     borrow::Cow,
-    cell::{Ref, RefCell},
+    cell::{Cell, Ref, RefCell},
     fmt::{self, Display, Write},
     hash::{self, Hash},
+    mem,
     ops::Deref,
 };
 
@@ -509,3 +511,82 @@ impl<VarId: VarIdx> SymbolTable<VarId> {
     }
 }
  */
+
+impl Program {
+    pub fn topo_sort_classes<'a>(&'a mut self) {
+        topo_sort_classes(&mut self.1);
+    }
+}
+
+fn topo_sort_classes(classes: &mut Vec<ClassDef>) {
+    // let names = classes.iter().map(|def| def.class.clone()).collect::<Vec<_>>();
+    let defs = mem::take(classes);
+    let mut indegree = defs
+        .into_iter()
+        .map(|def| (def.class.clone(), (def, Cell::new(0))))
+        .collect::<HashMap<_, _>>();
+    for (def, _) in indegree.values() {
+        if let Some(base) = def.base_class.as_ref() {
+            let deg_cell = indegree.get(base).map(|(_, count)| count).unwrap();
+            deg_cell.set(deg_cell.get() + 1);
+        }
+    }
+    let mut leaves_first = vec![];
+    while !indegree.is_empty() {
+        let extend_beg = leaves_first.len();
+        leaves_first.extend(
+            indegree
+                .drain_filter(|_, (_, deg)| deg.get() == 0)
+                .map(|(_, (def, _))| def),
+        );
+        for new_leaf in &leaves_first[extend_beg..] {
+            if let Some(base) = &new_leaf.base_class {
+                *indegree.get_mut(base).unwrap().1.get_mut() -= 1;
+            }
+        }
+    }
+
+    leaves_first.reverse();
+    mem::swap(&mut leaves_first, classes);
+}
+
+#[test]
+fn test_class_topo_sort() {
+    fn make_class_def(name: String, base: Option<String>) -> ClassDef {
+        ClassDef {
+            pos: Pos { line: 0, column: 0 },
+            class: name,
+            base_class: base,
+            class_block: ClassBlock(vec![]),
+        }
+    }
+    fn get_class_idx(toposorted: &[ClassDef], name: &str) -> usize {
+        toposorted
+            .iter()
+            .enumerate()
+            .find_map(|(idx, def)| (def.class == name).then_some(idx))
+            .unwrap()
+    }
+
+    // A -> B -> C
+    // |
+    // + -> D
+    //
+    // E
+    let mut classes1 = vec![
+        make_class_def("A".into(), None),
+        make_class_def("B".into(), Some("A".into())),
+        make_class_def("C".into(), Some("B".into())),
+        make_class_def("D".into(), Some("A".into())),
+        make_class_def("E".into(), None),
+    ];
+
+    topo_sort_classes(&mut classes1);
+    eprintln!(
+        "toposorted: {:?}",
+        classes1.iter().map(|def| &def.class).collect::<Vec<_>>()
+    );
+    assert!(get_class_idx(&classes1, "A") < get_class_idx(&classes1, "B"));
+    assert!(get_class_idx(&classes1, "B") < get_class_idx(&classes1, "C"));
+    assert!(get_class_idx(&classes1, "A") < get_class_idx(&classes1, "D"));
+}
