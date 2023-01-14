@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::ir::{
-    self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, EndType, Instant, Ir,
+    self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, Class, EndType, Instant, Ir,
     IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC, NEW_FUNC,
 };
 
@@ -234,14 +234,14 @@ pub struct Var(isize);
 #[derive(Clone, PartialEq, Eq)]
 pub enum Label {
     Num(usize),
-    Func(Ident),
+    Named(Ident),
     Str(StringLiteral),
 }
 impl Display for Label {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Label::Num(n) => write!(f, "__block_{}", n),
-            Label::Func(id) => f.write_str(id),
+            Label::Named(id) => f.write_str(id),
             Label::Str(n) => write!(f, "__string_{}", n.0),
         }
     }
@@ -575,7 +575,9 @@ impl CFG {
 
         eprintln!("Built frames: {:#?}\n\n", &frames);
 
-        writeln!(out, "section .text")?;
+        writeln!(out, "\nsection .text")?;
+        emit_vsts(out, &self.classes)?;
+
         emit_header(out, &mut state, frames.get(&REAL_MAIN.to_string()).unwrap())?;
 
         let mut emitted = HashSet::new();
@@ -589,7 +591,7 @@ impl CFG {
         {
             if matches!(convention, CallingConvention::StackVars) {
                 assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
-                let func_label = Label::Func(func.clone());
+                let func_label = Label::Named(func.clone());
 
                 eprintln!("\nEmitting function: {}", func);
                 writeln!(out, "")?;
@@ -826,8 +828,6 @@ impl Quadruple {
                 match un_op_type {
                     UnOpType::Not => Instr::Not(RAX).emit(out)?,
                     UnOpType::Neg => Instr::Neg(Loc::Reg(RAX)).emit(out)?,
-                    // UnOpType::Inc => Instr::Inc(Loc::Reg(RAX)).emit(out)?,
-                    // UnOpType::Dec => Instr::Dec(Loc::Reg(RAX)).emit(out)?,
                 }
                 Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
@@ -876,7 +876,7 @@ impl Quadruple {
                             )
                             .emit(out)?;
                         }
-                        Instr::Call(Label::Func(func.clone())).emit(out)?;
+                        Instr::Call(Label::Named(func.clone())).emit(out)?;
 
                         if stack_growth != 0 {
                             state.reset_rsp().emit(out)?;
@@ -906,7 +906,7 @@ impl Quadruple {
                         // Instr::Test(RDX).emit(out)?;
                         // Instr::Jnz(Label::Func(Ident::from("_notaligned"))).emit(out)?;
 
-                        Instr::Call(Label::Func(func.clone())).emit(out)?;
+                        Instr::Call(Label::Named(func.clone())).emit(out)?;
 
                         Instr::Add(RSP, Val::Instant(Instant(8))).emit(out)?;
 
@@ -982,14 +982,14 @@ fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame
 
     writeln!(out, "\nglobal main\n")?;
 
-    Label::Func(Ident::from("main".to_string())).emit(out)?;
+    Label::Named(Ident::from("main".to_string())).emit(out)?;
 
     let stack_growth = main_frame.frame_size - RETADDR_SIZE;
     if stack_growth != 0 {
         state.advance_rsp(stack_growth as isize).emit(out)?;
     }
 
-    Instr::Call(Label::Func(Ident::from(REAL_MAIN.to_string()))).emit(out)?;
+    Instr::Call(Label::Named(Ident::from(REAL_MAIN.to_string()))).emit(out)?;
 
     if stack_growth != 0 {
         state.reset_rsp().emit(out)?;
@@ -1019,5 +1019,25 @@ fn emit_string_literals(out: &mut impl Write, string_literals: &Vec<String>) -> 
             &string_literal[1..string_literal.len() - 1]
         )?;
     }
+    Ok(())
+}
+
+fn emit_vsts(out: &mut impl Write, classes: &[Class]) -> AsmGenResult {
+    for class in classes {
+        Label::Named(class.vst_name()).emit(out)?;
+        let sorted_methods = {
+            let mut vec = class
+                .methods
+                .values()
+                .map(|(name, idx, _)| (name, idx))
+                .collect::<Vec<_>>();
+            vec.sort_unstable();
+            vec.into_iter().map(|(name, _)| name)
+        };
+        for mangled_name in sorted_methods {
+            writeln!(out, "\tdq {}", mangled_name)?;
+        }
+    }
+    writeln!(out, "")?;
     Ok(())
 }

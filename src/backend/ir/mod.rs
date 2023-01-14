@@ -5,6 +5,7 @@ pub(crate) use gen::{CONCAT_STRINGS_FUNC, NEW_FUNC, REAL_MAIN};
 
 use std::{
     collections::{HashMap, HashSet},
+    fmt::format,
     ops::{Deref, Index, IndexMut},
 };
 
@@ -303,7 +304,7 @@ pub struct Field {
 
 #[derive(Debug)]
 pub struct Class {
-    _name: Ident,
+    pub name: Ident,
     _idx: ClassIdx,
     base_idx: Option<ClassIdx>,
     pub size: usize, // num elems, TODO: for virtual classes add VST size
@@ -315,7 +316,7 @@ pub struct Class {
 impl Class {
     fn new(name: Ident, idx: ClassIdx, base_idx: Option<ClassIdx>) -> Self {
         Self {
-            _name: name,
+            name,
             _idx: idx,
             base_idx,
             size: 1, /*VST size*/
@@ -364,5 +365,9 @@ impl Class {
             };
         self.methods
             .insert(src_name, (mangled_name, method_idx, params));
+    }
+
+    pub(crate) fn vst_name(&self) -> Ident {
+        format!("{}___VST", &self.name)
     }
 }
