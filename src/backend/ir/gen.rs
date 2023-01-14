@@ -194,7 +194,7 @@ impl CFG {
         method: &Ident,
     ) -> (ClassIdx, Ident) {
         loop {
-            if let Some((mangled_name, _)) = self.classes[current_class.0].methods.get(method) {
+            if let Some((mangled_name, _, _)) = self.classes[current_class.0].methods.get(method) {
                 return (current_class, mangled_name.clone());
             } else {
                 match self.classes[current_class.0].base_idx {
@@ -543,14 +543,20 @@ impl Program {
         {
             let class_idx = state.register_class_if_not_yet_registered(class_name.clone());
 
+            if let Some(base_idx) = cfg.classes[class_idx.0].base_idx {
+                let base_class = &cfg.classes[base_idx.0];
+                let (base_methods, base_next_method_idx) =
+                    (base_class.methods.clone(), base_class.next_method_idx);
+                let class = &mut cfg.classes[class_idx.0];
+                class.methods = base_methods;
+                class.next_method_idx = base_next_method_idx;
+            }
+
             for class_item in &class_block.0 {
                 match class_item {
                     ClassItem::Field(_, _, _) => (),
                     ClassItem::Method(method) => {
                         let mangled_name = mangle_method(&method.name, &class_name);
-                        cfg.classes[class_idx.0]
-                            .methods
-                            .insert(method.name.clone(), (mangled_name.clone(), VecMap::new()));
 
                         // `self` is added as the last parameter in IrFunction
                         let method_type = {
@@ -570,20 +576,18 @@ impl Program {
                         param_vars.push(self_var);
 
                         // Store params mapping for method definitions below
-                        let method_params = &mut cfg.classes[class_idx.0]
-                            .methods
-                            .get_mut(&method.name)
-                            .unwrap()
-                            .1;
-                        for (param_name, param_var) in method
+                        let params = method
                             .params
                             .iter()
                             .map(|param| param.name.clone())
                             .chain(iter::once(SELF.to_string()))
                             .zip(param_vars.iter().copied())
-                        {
-                            method_params.insert(param_name, param_var);
-                        }
+                            .collect::<VecMap<_, _>>();
+                        cfg.classes[class_idx.0].add_method(
+                            method.name.clone(),
+                            mangled_name.clone(),
+                            params,
+                        );
 
                         cfg.new_function(mangled_name, method_type, param_vars, Some(self_var));
                     }
@@ -620,7 +624,7 @@ impl Program {
             // Add fields to variable env
             for class_item in class_items {
                 match class_item {
-                    ClassItem::Field(_, typ, field_name) => {
+                    ClassItem::Field(_, _, field_name) => {
                         // cfg.classes[class_idx.0].add_field(field_name.clone(), typ.clone().into());
                         state.declare_var(field_name.clone(), VariableKind::ClassField);
                     }
@@ -641,10 +645,10 @@ impl Program {
                         // Parameters
                         for (param_name, param_var) in cfg.classes[class_idx.0]
                             .methods
-                            .get_mut(&method.name)
+                            .get/*_mut*/(&method.name)
                             .unwrap()
-                            .1
-                            .drain()
+                            .2
+                            /*.drain()*/.clone()
                         {
                             method_state.declare_var(param_name, VariableKind::StackVar(param_var));
                         }
@@ -1048,6 +1052,7 @@ fn finish_cond_ctx_leaf(
 }
 
 impl Expr {
+    #[allow(unused)]
     fn debug_surface<'a>(&'a self) -> DebugExprInner<'a> {
         DebugExprInner(self)
     }

@@ -149,6 +149,7 @@ impl VarType {
         self.as_ptr().and_then(|ptr| ptr.as_class())
     }
 
+    #[allow(unused)]
     fn into_class(self) -> Option<Ident> {
         self.into_ptr().ok().and_then(|res| res.into_class().ok())
     }
@@ -297,7 +298,7 @@ pub struct ClassIdx(usize);
 #[derive(Debug, Clone)]
 pub struct Field {
     offset: usize,
-    typ: VarType,
+    _typ: VarType,
 }
 
 #[derive(Debug)]
@@ -307,7 +308,8 @@ pub struct Class {
     base_idx: Option<ClassIdx>,
     pub size: usize, // num elems, TODO: for virtual classes add VST size
     pub fields: VecMap<Ident, Field>,
-    pub methods: VecMap<Ident, (Ident, VecMap<Ident, Var>)>,
+    pub methods: VecMap<Ident, (Ident, usize, VecMap<Ident, Var>)>, // src_name -> (mangled_name, method_idx, map<param_name -> param_var>)
+    next_method_idx: usize,
 }
 
 impl Class {
@@ -316,18 +318,19 @@ impl Class {
             _name: name,
             _idx: idx,
             base_idx,
-            size: 0,
+            size: 1, /*VST size*/
             fields: VecMap::new(),
             methods: VecMap::new(),
+            next_method_idx: 0,
         }
     }
 
     fn add_field(&mut self, name: Ident, typ: VarType) {
-        let field_idx = self.fields.len();
+        let field_idx = self.fields.len() + /*VST ptr size*/1;
         self.fields.insert(
             name,
             Field {
-                typ,
+                _typ: typ,
                 offset: field_idx * QUADWORD_SIZE,
             },
         );
@@ -346,5 +349,20 @@ impl Class {
             }
         }
         unreachable!();
+    }
+
+    fn add_method(&mut self, src_name: Ident, mangled_name: Ident, params: VecMap<Ident, Var>) {
+        let method_idx =
+            if let Some(method_idx) = self.methods.get(&src_name).map(|method| method.1) {
+                // override
+                method_idx
+            } else {
+                // add new
+                let method_idx = self.next_method_idx;
+                self.next_method_idx += 1;
+                method_idx
+            };
+        self.methods
+            .insert(src_name, (mangled_name, method_idx, params));
     }
 }
