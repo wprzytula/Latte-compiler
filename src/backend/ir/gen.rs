@@ -254,6 +254,7 @@ impl BasicBlock {
                 | Quadruple::Call(var, _, _)
                 | Quadruple::DerefLoad(var, _) => Some(*var),
                 Quadruple::DerefStore(_, _) => None,
+                Quadruple::VstStore(_, _) => None,
                 Quadruple::InPlaceUnOp(_, _) => None,
                 Quadruple::ArrLoad(_, _, _) => todo!(),
                 Quadruple::ArrStore(_, _, _) => todo!(),
@@ -310,6 +311,9 @@ impl BasicBlock {
                 }
                 Quadruple::InPlaceUnOp(_, loc) => {
                     vars.insert(loc.var());
+                }
+                Quadruple::VstStore(_, mem) => {
+                    vars.insert(mem.base);
                 }
             };
         }
@@ -517,7 +521,7 @@ impl Program {
                 for (field_name, _field) in &base_fields {
                     state.declare_var(field_name.clone(), VariableKind::ClassField);
                 }
-                cfg.classes[class_idx.0].size += base_fields.len();
+                cfg.classes[class_idx.0].size += base_fields.len() + 1/*VST*/;
                 cfg.classes[class_idx.0].fields = base_fields;
             }
 
@@ -1547,6 +1551,14 @@ impl LVal {
                         NEW_FUNC.into(),
                         vec![Value::Instant(Instant((class_size * QUADWORD_SIZE) as i64))],
                     ));
+                    cfg.current_mut().quadruples.push(Quadruple::VstStore(
+                        class_idx,
+                        Mem {
+                            base: var,
+                            offset: 0,
+                        },
+                    ));
+
                     Loc::Var(var)
                 }
                 NewType::TIntArr(_)

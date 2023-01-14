@@ -1,11 +1,10 @@
 mod gen;
-mod opts;
+// mod opts;
 
 pub(crate) use gen::{CONCAT_STRINGS_FUNC, NEW_FUNC, REAL_MAIN};
 
 use std::{
     collections::{HashMap, HashSet},
-    fmt::format,
     ops::{Deref, Index, IndexMut},
 };
 
@@ -204,6 +203,8 @@ pub enum Quadruple {
 
     DerefLoad(Var, Mem),    // (dst, ptr)
     DerefStore(Value, Mem), // (src, ptr)
+
+    VstStore(ClassIdx, Mem),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -294,7 +295,7 @@ pub struct BasicBlock {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ClassIdx(usize);
+pub struct ClassIdx(pub usize);
 
 #[derive(Debug, Clone)]
 pub struct Field {

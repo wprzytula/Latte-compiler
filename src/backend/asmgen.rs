@@ -333,12 +333,14 @@ enum Instr {
     Sar(Reg, Instant),
 
     Lea(Reg, Mem),
+    LeaLabel(Reg, String),
 
     Push(Val),
     Pop(Reg),
 
     Ret,
     Call(Label),
+    CallReg(Reg),
     Syscall,
 }
 
@@ -383,13 +385,16 @@ impl Instr {
             Instr::Sar(reg, i) => writeln!(out, "sar {}, {}", reg, **i),
 
             Instr::Lea(reg, mem) => writeln!(out, "lea {}, {}", reg, mem),
+            Instr::LeaLabel(reg, label) => writeln!(out, "lea {}, [rel {}]", reg, label),
 
             Instr::Push(val) => writeln!(out, "push {}", val),
             Instr::Pop(reg) => writeln!(out, "pop {}", reg),
 
             Instr::Ret => writeln!(out, "ret"),
             Instr::Call(label) => writeln!(out, "call {}", label),
+            Instr::CallReg(reg) => writeln!(out, "call {}", reg),
             Instr::Syscall => writeln!(out, "syscall"),
+
             Instr::LoadString(reg, idx) => writeln!(out, "lea {}, [rel {}]", reg, Label::Str(*idx)),
         }
     }
@@ -967,6 +972,25 @@ impl Quadruple {
                     Instr::MovToMem(frame.get_variable_mem(*var, state.rsp_displacement), RAX)
                         .emit(out)?;
                 }
+            }
+
+            Quadruple::VstStore(class_idx, mem) => {
+                Instr::LeaLabel(R8, cfg.classes[class_idx.0].vst_name()).emit(out)?;
+                Instr::MovToReg(
+                    R9,
+                    Val::Mem(frame.get_variable_mem(mem.base, state.rsp_displacement)),
+                )
+                .emit(out)?;
+                Instr::MovToMem(
+                    Mem {
+                        word_len: WordLen::Qword,
+                        base: R9,
+                        index: None,
+                        displacement: None,
+                    },
+                    R8,
+                )
+                .emit(out)?;
             }
         };
         Ok(())
