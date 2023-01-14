@@ -37,10 +37,13 @@ fn main() -> Result<(), Error> {
     if was_error.get() {
         return Err(Error::Parse);
     } else {
-        let ast = Program::try_from(antlr_ast);
+        let mut ast = Program::try_from(antlr_ast);
         match ast {
-            Ok(ref ast) => match ast.type_check() {
-                Ok(()) => eprintln!("OK"),
+            Ok(ref mut ast) => match ast.type_check() {
+                Ok(()) => {
+                    eprintln!("OK");
+                    ast.topo_sort_classes();
+                }
                 Err(e) => {
                     eprintln!("ERROR");
                     return Err(Error::TypeCheck(e));
