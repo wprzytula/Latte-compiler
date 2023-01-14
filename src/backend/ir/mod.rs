@@ -205,6 +205,8 @@ pub enum Quadruple {
     DerefStore(Value, Mem), // (src, ptr)
 
     VstStore(ClassIdx, Mem),
+
+    VirtualCall(Var, Var, usize, Vec<Value>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -303,6 +305,14 @@ pub struct Field {
     _typ: VarType,
 }
 
+#[derive(Debug, Clone)]
+pub struct Method {
+    pub mangled_name: Ident,
+    pub idx: usize,
+    pub params: VecMap<Ident, Var>,
+    pub rettype: DataType,
+}
+
 #[derive(Debug)]
 pub struct Class {
     pub name: Ident,
@@ -310,7 +320,7 @@ pub struct Class {
     base_idx: Option<ClassIdx>,
     pub size: usize, // num elems, TODO: for virtual classes add VST size
     pub fields: VecMap<Ident, Field>,
-    pub methods: VecMap<Ident, (Ident, usize, VecMap<Ident, Var>)>, // src_name -> (mangled_name, method_idx, map<param_name -> param_var>)
+    pub methods: VecMap<Ident, Method>, // src_name -> (mangled_name, method_idx, map<param_name -> param_var>)
     next_method_idx: usize,
 }
 
@@ -353,9 +363,15 @@ impl Class {
         unreachable!();
     }
 
-    fn add_method(&mut self, src_name: Ident, mangled_name: Ident, params: VecMap<Ident, Var>) {
+    fn add_method(
+        &mut self,
+        src_name: Ident,
+        mangled_name: Ident,
+        params: VecMap<Ident, Var>,
+        rettype: DataType,
+    ) {
         let method_idx =
-            if let Some(method_idx) = self.methods.get(&src_name).map(|method| method.1) {
+            if let Some(method_idx) = self.methods.get(&src_name).map(|method| method.idx) {
                 // override
                 method_idx
             } else {
@@ -364,8 +380,15 @@ impl Class {
                 self.next_method_idx += 1;
                 method_idx
             };
-        self.methods
-            .insert(src_name, (mangled_name, method_idx, params));
+        self.methods.insert(
+            src_name,
+            Method {
+                mangled_name,
+                idx: method_idx,
+                params,
+                rettype,
+            },
+        );
     }
 
     pub(crate) fn vst_name(&self) -> Ident {

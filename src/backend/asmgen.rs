@@ -992,6 +992,8 @@ impl Quadruple {
                 )
                 .emit(out)?;
             }
+
+            Quadruple::VirtualCall(_, _, _, _) => todo!(),
         };
         Ok(())
     }
@@ -1053,7 +1055,13 @@ fn emit_vsts(out: &mut impl Write, classes: &[Class]) -> AsmGenResult {
             let mut vec = class
                 .methods
                 .values()
-                .map(|(name, idx, _)| (name, idx))
+                .map(
+                    |ir::Method {
+                         mangled_name: name,
+                         idx,
+                         ..
+                     }| (name, idx),
+                )
                 .collect::<Vec<_>>();
             vec.sort_unstable();
             vec.into_iter().map(|(name, _)| name)

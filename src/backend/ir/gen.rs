@@ -194,7 +194,9 @@ impl CFG {
         method: &Ident,
     ) -> (ClassIdx, Ident) {
         loop {
-            if let Some((mangled_name, _, _)) = self.classes[current_class.0].methods.get(method) {
+            if let Some(Method { mangled_name, .. }) =
+                self.classes[current_class.0].methods.get(method)
+            {
                 return (current_class, mangled_name.clone());
             } else {
                 match self.classes[current_class.0].base_idx {
@@ -220,10 +222,6 @@ impl BasicBlock {
             phi_nodes: VecMap::new(),
         }
     }
-
-    // fn assert_sane(&self) {
-    //     assert!(self.quadruples.is_empty() || self.end_type.is_some())
-    // }
 
     pub fn is_empty(&self) -> bool {
         self.quadruples.is_empty()
@@ -252,6 +250,7 @@ impl BasicBlock {
                 | Quadruple::Set(var, _)
                 | Quadruple::GetStrLit(var, _)
                 | Quadruple::Call(var, _, _)
+                | Quadruple::VirtualCall(var, _, _, _)
                 | Quadruple::DerefLoad(var, _) => Some(*var),
                 Quadruple::DerefStore(_, _) => None,
                 Quadruple::VstStore(_, _) => None,
@@ -314,6 +313,15 @@ impl BasicBlock {
                 }
                 Quadruple::VstStore(_, mem) => {
                     vars.insert(mem.base);
+                }
+                Quadruple::VirtualCall(var, obj_var, _, args) => {
+                    vars.insert(*var);
+                    vars.insert(*obj_var);
+                    for arg in args {
+                        if let Value::Variable(var) = arg {
+                            vars.insert(*var);
+                        }
+                    }
                 }
             };
         }
@@ -591,6 +599,7 @@ impl Program {
                             method.name.clone(),
                             mangled_name.clone(),
                             params,
+                            method_type.ret_type.clone(),
                         );
 
                         cfg.new_function(mangled_name, method_type, param_vars, Some(self_var));
@@ -651,7 +660,7 @@ impl Program {
                             .methods
                             .get/*_mut*/(&method.name)
                             .unwrap()
-                            .2
+                            .params
                             /*.drain()*/.clone()
                         {
                             method_state.declare_var(param_name, VariableKind::StackVar(param_var));
@@ -1502,8 +1511,7 @@ impl LVal {
                 let typ = object.typ().unwrap();
                 let this_class_name = typ.as_class().unwrap();
                 let this_class_idx = state.retrieve_class_idx(this_class_name);
-                let (_method_base_class, mangled_name) =
-                    cfg.resolve_method_base(this_class_idx, method_name);
+
                 let loc = object.ir(cfg, state, None);
                 let object = match loc {
                     Loc::Var(var) => var,
@@ -1520,24 +1528,26 @@ impl LVal {
                     .map(|arg| arg.ir_fut().ir(cfg, state, None))
                     .chain(iter::once(Value::Variable(object)))
                     .collect::<Vec<_>>();
-                assert_eq!(
-                    args.len(),
-                    cfg.functions.get(&mangled_name).unwrap().params.len()
-                );
-                let rettype = cfg
-                    .functions
-                    .get(&mangled_name)
-                    .unwrap()
-                    .typ
-                    .ret_type
+                // assert_eq!(
+                //     args.len(),
+                //     cfg.functions.get(&mangled_name).unwrap().params.len()
+                // );
+                let method = cfg.classes[this_class_idx.0]
+                    .methods
+                    .get(method_name)
+                    .unwrap();
+                let method_idx = method.idx;
+                let rettype = method
+                    .rettype
                     .clone()
                     .into_nonvoid()
                     .unwrap_or(NonvoidType::TInt)
                     .into();
                 let retvar = state.fresh_reg(rettype);
+
                 cfg.current_mut()
                     .quadruples
-                    .push(Quadruple::Call(retvar, mangled_name, args));
+                    .push(Quadruple::VirtualCall(retvar, object, method_idx, args));
                 Loc::Var(retvar)
             }
 
