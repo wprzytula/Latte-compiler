@@ -194,7 +194,7 @@ impl CFG {
         method: &Ident,
     ) -> (ClassIdx, Ident) {
         loop {
-            if let Some(mangled_name) = self.classes[current_class.0].methods.get(method) {
+            if let Some((mangled_name, _)) = self.classes[current_class.0].methods.get(method) {
                 return (current_class, mangled_name.clone());
             } else {
                 match self.classes[current_class.0].base_idx {
@@ -356,7 +356,7 @@ mod state {
 
     #[derive(Debug, Clone, Copy)]
     pub(crate) enum VariableKind {
-        StackVar,
+        StackVar(Var),
         ClassField,
     }
 
@@ -369,7 +369,7 @@ mod state {
         class_mapping: VecMap<Ident, ClassIdx>,
 
         /* env-like flow */
-        var_location: Map<Ident, (Var, VariableKind)>,
+        var_location: Map<Ident, VariableKind>,
     }
     impl State {
         pub(crate) fn new() -> Self {
@@ -416,18 +416,18 @@ mod state {
             params
                 .map(|(param_name, param_type)| {
                     let var = self.fresh_reg(param_type.into());
-                    self.declare_var(param_name, var, VariableKind::StackVar);
+                    self.declare_var(param_name, VariableKind::StackVar(var));
                     var
                 })
                 .collect()
         }
 
-        pub(crate) fn declare_var(&mut self, id: Ident, var: Var, variable_kind: VariableKind) {
-            eprintln!("Declared var: {} -> {:?}", &id, var);
-            self.var_location.insert_mut(id, (var, variable_kind));
+        pub(crate) fn declare_var(&mut self, id: Ident, variable_kind: VariableKind) {
+            eprintln!("Declared var: {} -> {:?}", &id, variable_kind);
+            self.var_location.insert_mut(id, variable_kind);
         }
 
-        pub(crate) fn retrieve_var(&mut self, id: &Ident) -> (Var, VariableKind) {
+        pub(crate) fn retrieve_var(&mut self, id: &Ident) -> VariableKind {
             *self
                 .var_location
                 .get(id)
@@ -465,9 +465,26 @@ impl Program {
         let mut state = State::new();
         let mut cfg = CFG::new(&mut state);
 
+        Self::ir_for_classes(&mut cfg, &mut state, &self.1);
+
+        Self::ir_for_functions(&mut cfg, &mut state, &self.0);
+
+        cfg.link_succ_and_pred();
+        // eprintln!("BEFORE SSA: max var = {}", state.fresh_reg(None).0);
+        // cfg.make_ssa(&mut state);
+        // cfg.optimise_ssa();
+        Ir {
+            cfg,
+            string_literals: state.string_literals,
+        }
+    }
+
+    fn ir_for_classes(cfg: &mut CFG, state: &mut State, class_defs: &[ClassDef]) {
+        eprintln!("\n\tRegistering classes:");
+        // Register classes
         for ClassDef {
             class, base_class, ..
-        } in self.1.iter()
+        } in class_defs
         {
             let class_idx = state.register_class_if_not_yet_registered(class.clone());
             let base_idx = base_class
@@ -478,12 +495,14 @@ impl Program {
                 .push(Class::new(class.clone(), class_idx, base_idx));
         }
 
+        eprintln!("\n\tDeclaring fields:");
+        // Declare fields
         for ClassDef {
             class: class_name,
             class_block: ClassBlock(class_items),
             base_class,
             ..
-        } in self.1.iter()
+        } in class_defs
         {
             let state: &mut State = &mut state.new_scope();
             let class_idx = state.retrieve_class_idx(class_name);
@@ -492,12 +511,11 @@ impl Program {
                 .map(|base| state.retrieve_class_idx(base));
 
             // Add base class fields to variable env
-            // ASSUMPTION: Base class declared before derived
+            // ASSUMPTION: Base class declared before derived -> fulfilled by toposort
             if let Some(base_class_idx) = base_class_idx {
                 let base_fields = cfg.classes[base_class_idx.0].fields.clone();
-                for (field_name, field) in &base_fields {
-                    let var = state.fresh_reg(field.typ.clone());
-                    state.declare_var(field_name.clone(), var, VariableKind::ClassField);
+                for (field_name, _field) in &base_fields {
+                    state.declare_var(field_name.clone(), VariableKind::ClassField);
                 }
                 cfg.classes[class_idx.0].size += base_fields.len();
                 cfg.classes[class_idx.0].fields = base_fields;
@@ -508,26 +526,33 @@ impl Program {
                 match class_item {
                     ClassItem::Field(_, typ, field_name) => {
                         cfg.classes[class_idx.0].add_field(field_name.clone(), typ.clone().into());
-                        let var = state.fresh_reg(typ.clone().into());
-                        state.declare_var(field_name.clone(), var, VariableKind::ClassField);
+                        state.declare_var(field_name.clone(), VariableKind::ClassField);
                     }
                     ClassItem::Method(_) => (), // not yet
                 }
             }
+        }
 
-            cfg.current_class = Some(class_idx);
-            for class_item in class_items {
+        eprintln!("\n\tDeclaring methods:");
+        // Declare methods
+        for ClassDef {
+            class: class_name,
+            class_block,
+            ..
+        } in class_defs
+        {
+            let class_idx = state.register_class_if_not_yet_registered(class_name.clone());
+
+            for class_item in &class_block.0 {
                 match class_item {
-                    ClassItem::Field(_, _, _) => (), // already covered
+                    ClassItem::Field(_, _, _) => (),
                     ClassItem::Method(method) => {
                         let mangled_name = mangle_method(&method.name, &class_name);
                         cfg.classes[class_idx.0]
                             .methods
-                            .insert(method.name.clone(), mangled_name.clone());
-                        // let params = iter::once(NonvoidType::TClass(class_name.clone())).chain(
-                        //     method.params.iter().map(|p| p.type_.clone())).collect::<Vec<_>>();
+                            .insert(method.name.clone(), (mangled_name.clone(), VecMap::new()));
 
-                        // `this` is added as the last parameter in IrFunction
+                        // `self` is added as the last parameter in IrFunction
                         let method_type = {
                             let mut fun_type = method.fun_type();
                             fun_type
@@ -544,21 +569,106 @@ impl Program {
                         );
                         param_vars.push(self_var);
 
-                        cfg.new_function(mangled_name, method_type, param_vars, Some(self_var));
+                        // Store params mapping for method definitions below
+                        let method_params = &mut cfg.classes[class_idx.0]
+                            .methods
+                            .get_mut(&method.name)
+                            .unwrap()
+                            .1;
+                        for (param_name, param_var) in method
+                            .params
+                            .iter()
+                            .map(|param| param.name.clone())
+                            .chain(iter::once(SELF.to_string()))
+                            .zip(param_vars.iter().copied())
+                        {
+                            method_params.insert(param_name, param_var);
+                        }
 
+                        cfg.new_function(mangled_name, method_type, param_vars, Some(self_var));
+                    }
+                }
+            }
+        }
+
+        eprintln!("\n\tDefining methods:");
+        // Declare fields and define methods
+        for ClassDef {
+            class: class_name,
+            class_block: ClassBlock(class_items),
+            base_class,
+            ..
+        } in class_defs
+        {
+            let state: &mut State = &mut state.new_scope();
+            let class_idx = state.retrieve_class_idx(class_name);
+            let base_class_idx = base_class
+                .as_ref()
+                .map(|base| state.retrieve_class_idx(base));
+
+            // Add base class fields to variable env
+            // ASSUMPTION: Base class declared before derived -> fulfilled by toposort
+            if let Some(base_class_idx) = base_class_idx {
+                let base_fields = cfg.classes[base_class_idx.0].fields.clone();
+                for (field_name, _field) in &base_fields {
+                    state.declare_var(field_name.clone(), VariableKind::ClassField);
+                }
+                // cfg.classes[class_idx.0].size += base_fields.len();
+                // cfg.classes[class_idx.0].fields = base_fields;
+            }
+
+            // Add fields to variable env
+            for class_item in class_items {
+                match class_item {
+                    ClassItem::Field(_, typ, field_name) => {
+                        // cfg.classes[class_idx.0].add_field(field_name.clone(), typ.clone().into());
+                        state.declare_var(field_name.clone(), VariableKind::ClassField);
+                    }
+                    ClassItem::Method(_) => (), // not yet
+                }
+            }
+
+            cfg.current_class = Some(class_idx);
+            for class_item in class_items {
+                match class_item {
+                    ClassItem::Field(_, _, _) => (), // already covered
+                    ClassItem::Method(method) => {
+                        let mangled_name = mangle_method(&method.name, &class_name);
+
+                        // New-scoped state
                         let method_state = &mut state.new_scope();
 
-                        method_state.declare_var(SELF.into(), self_var, VariableKind::StackVar);
+                        // Parameters
+                        for (param_name, param_var) in cfg.classes[class_idx.0]
+                            .methods
+                            .get_mut(&method.name)
+                            .unwrap()
+                            .1
+                            .drain()
+                        {
+                            method_state.declare_var(param_name, VariableKind::StackVar(param_var));
+                        }
+
+                        // Self
+                        let ir_func = cfg.functions.get(&mangled_name).unwrap();
+                        let self_var = ir_func.self_var.unwrap();
+                        method_state.declare_var(SELF.into(), VariableKind::StackVar(self_var));
+
+                        // current_func to properly name blocks
+                        cfg.current_func = mangled_name.clone();
 
                         eprintln!("\nEmitting IR for method: {}:{}", class_name, &method.name);
-                        method.block.ir(&mut cfg, method_state);
+                        cfg.make_current(ir_func.entry.unwrap(), "Defining methods");
+                        method.block.ir(cfg, method_state);
                     }
                 }
             }
         }
         cfg.current_class = None;
+    }
 
-        for func in self.0.iter() {
+    fn ir_for_functions(cfg: &mut CFG, state: &mut State, fun_defs: &[FunDef]) {
+        for func in fun_defs {
             let param_vars = state.declare_and_give_params(
                 func.params
                     .iter()
@@ -566,16 +676,7 @@ impl Program {
             );
             cfg.new_function(func.name.clone(), func.fun_type(), param_vars, None);
             eprintln!("\nEmitting IR for function: {}", &func.name);
-            func.block.ir(&mut cfg, &mut state);
-        }
-
-        cfg.link_succ_and_pred();
-        // eprintln!("BEFORE SSA: max var = {}", state.fresh_reg(None).0);
-        // cfg.make_ssa(&mut state);
-        // cfg.optimise_ssa();
-        Ir {
-            cfg,
-            string_literals: state.string_literals,
+            func.block.ir(cfg, &mut state.new_scope());
         }
     }
 }
@@ -643,7 +744,7 @@ impl Stmt {
                             .quadruples
                             .push(Quadruple::Set(var, Instant(0)))
                     }
-                    state.declare_var(decl.name.clone(), var, VariableKind::StackVar);
+                    state.declare_var(decl.name.clone(), VariableKind::StackVar(var));
                 }
                 false
             }
@@ -1313,9 +1414,9 @@ impl LVal {
         let typ = self.typ();
         match &self.1 {
             LValInner::Id(var_id) => {
-                let (var, var_kind) = state.retrieve_var(var_id);
+                let var_kind = state.retrieve_var(var_id);
                 let loc = match var_kind {
-                    VariableKind::StackVar => Loc::Var(var),
+                    VariableKind::StackVar(var) => Loc::Var(var),
                     VariableKind::ClassField => {
                         let current_class_idx = cfg.current_class.unwrap();
                         let this_var = {

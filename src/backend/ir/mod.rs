@@ -307,7 +307,7 @@ pub struct Class {
     base_idx: Option<ClassIdx>,
     pub size: usize, // num elems, TODO: for virtual classes add VST size
     pub fields: VecMap<Ident, Field>,
-    pub methods: VecMap<Ident, Ident>,
+    pub methods: VecMap<Ident, (Ident, VecMap<Ident, Var>)>,
 }
 
 impl Class {
