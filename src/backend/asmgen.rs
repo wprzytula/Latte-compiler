@@ -1113,7 +1113,76 @@ impl Quadruple {
                 .emit(out)?;
             }
 
-            Quadruple::VirtualCall(_, _, _, _) => todo!(),
+            Quadruple::VirtualCall(dst, object, method_idx, args) => {
+                // Params in registers
+                for (reg, arg) in params_registers().zip(args.iter().copied()) {
+                    Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement)).emit(out)?;
+                }
+
+                let params_on_the_stack_num = usize::max(
+                    (args.len() as isize - params_registers().count() as isize) as usize,
+                    0,
+                );
+
+                let stack_alignment_growth = if params_on_the_stack_num % 2 != 0 {
+                    QUADWORD_SIZE
+                } else {
+                    0
+                }; // stack alignment
+
+                if stack_alignment_growth != 0 {
+                    state
+                        .advance_rsp(stack_alignment_growth as isize)
+                        .emit(out)?;
+                }
+
+                // Params on the stack
+                for arg in args.iter().copied().skip(params_registers().count()).rev() {
+                    Instr::Push(frame.get_val(arg, state.rsp_displacement)).emit(out)?;
+                    state.rsp_displacement += QUADWORD_SIZE as isize;
+                }
+
+                // Get the object
+                Instr::MovToReg(
+                    RAX,
+                    Val::Mem(frame.get_variable_mem(*object, state.rsp_displacement)),
+                )
+                .emit(out)?;
+
+                // Get VST ptr from the object
+                Instr::MovToReg(
+                    RAX,
+                    Val::Mem(Mem {
+                        word_len: WordLen::Qword,
+                        base: RAX,
+                        index: None,
+                        displacement: None,
+                    }),
+                )
+                .emit(out)?;
+
+                // Virtual call: get method address from VST
+                Instr::MovToReg(
+                    RAX,
+                    Val::Mem(Mem {
+                        word_len: WordLen::Qword,
+                        base: RAX,
+                        index: None,
+                        displacement: Some((*method_idx * QUADWORD_SIZE) as isize),
+                    }),
+                )
+                .emit(out)?;
+
+                Instr::CallReg(RAX).emit(out)?;
+
+                if stack_alignment_growth != 0 || params_on_the_stack_num > 0 {
+                    state.reset_rsp().emit(out)?;
+                }
+
+                // Save return value
+                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                    .emit(out)?;
+            }
         };
         Ok(())
     }
