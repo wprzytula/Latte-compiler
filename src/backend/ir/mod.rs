@@ -1,7 +1,7 @@
 mod gen;
 // mod opts;
 
-pub(crate) use gen::{CONCAT_STRINGS_FUNC, NEW_FUNC, REAL_MAIN};
+pub(crate) use gen::{CONCAT_STRINGS_FUNC, NEW_FUNC};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -214,8 +214,8 @@ pub struct BasicBlockIdx(usize);
 
 #[derive(Debug, Clone, Copy)]
 pub enum CallingConvention {
-    StackVars,
-    Cdecl,
+    SimpleCdecl,
+    CdeclFFI,
 }
 
 #[derive(Debug)]
@@ -287,7 +287,7 @@ pub enum BasicBlockKind {
 pub struct BasicBlock {
     _idx: BasicBlockIdx,
     _func: Ident,
-    _kind: BasicBlockKind,
+    pub kind: BasicBlockKind,
     pub quadruples: Vec<Quadruple>,
     pub successors: Vec<BasicBlockIdx>,
     pub predecessors: Vec<BasicBlockIdx>,

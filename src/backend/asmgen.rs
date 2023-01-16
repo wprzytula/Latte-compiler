@@ -6,14 +6,12 @@ use std::{
 
 use vector_map::VecMap;
 
-use crate::{
-    backend::ir::REAL_MAIN,
-    frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS},
-};
+use crate::frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS};
 
 use super::ir::{
-    self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, Class, EndType, Instant, Ir,
-    IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC, NEW_FUNC,
+    self, BasicBlock, BasicBlockIdx, BasicBlockKind, BinOpType, CallingConvention, Class, EndType,
+    Instant, Ir, IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG,
+    CONCAT_STRINGS_FUNC, NEW_FUNC,
 };
 
 const ARGS_IN_REGISTERS: usize = 6;
@@ -255,7 +253,8 @@ impl Label {
 struct AsmGenState {
     block_labels: HashMap<BasicBlockIdx, Label>,
     next_label_idx: usize,
-    rsp_displacement: isize, // where is ret addr relatively to current RSP
+    rsp_displacement: isize, // where is end of the frame relatively to current RSP
+    calltime_rsp_position: isize, // rsp displacement at the moment of function call
 }
 
 impl AsmGenState {
@@ -264,6 +263,7 @@ impl AsmGenState {
             block_labels: HashMap::new(),
             next_label_idx: 0,
             rsp_displacement: 0,
+            calltime_rsp_position: 0,
         }
     }
 
@@ -281,15 +281,36 @@ impl AsmGenState {
         label
     }
 
+    fn enter_frame(&mut self, frame_size: usize) {
+        let calltime_rsp_position = -((frame_size - RETADDR_SIZE) as isize);
+        self.calltime_rsp_position = calltime_rsp_position;
+        self.rsp_displacement = calltime_rsp_position;
+        eprintln!(
+            "Entering frame, so RSP gets displacement {}",
+            -calltime_rsp_position
+        );
+    }
+
     fn advance_rsp(&mut self, displacement: isize) -> Instr {
-        self.rsp_displacement = displacement;
+        eprintln!("Advancing RSP with displacement {}", -displacement);
+        self.rsp_displacement += displacement;
         Instr::Sub(RSP, Val::Instant(Instant(displacement as i64)))
     }
 
     fn reset_rsp(&mut self) -> Instr {
         let rsp_displacement = self.rsp_displacement;
+        eprintln!("Resetting RSP with displacement {}", rsp_displacement);
         self.rsp_displacement = 0;
         Instr::Add(RSP, Val::Instant(Instant(rsp_displacement as i64)))
+    }
+
+    fn leave(&mut self) -> Instr {
+        assert_eq!(self.rsp_displacement, 0);
+        // self.rsp_displacement = self.calltime_rsp_position; // this should not happen not to affect other code paths
+        Instr::Sub(
+            RSP,
+            Val::Instant(Instant(self.calltime_rsp_position as i64)),
+        )
     }
 }
 
@@ -415,19 +436,20 @@ impl RelOpType {
 }
 
 /**
- * Calling convention
- * base_var1 | ... | base_varn | base_retcode [base_frame end] | [child_frame begin] var1 | var2 | ... | varn | retcode [child_frame_end]
- * upon call, the caller makes place for all callee's variables and calls (pushes retcode and jumps to the callee's label).
- * after call, the caller must clean up the callee's variables.
+ * Calling convention - x86_64
+ * base_retaddr [base_frame end] | base_var1 | ... | base_varn | [child_frame begin] retaddr | var1 | var2 | ... | varn [child_frame_end]
+ * upon call, the caller simply calls (pushes retaddr and jumps to the callee's label).
+ * the callee makes place for all variables, and cleans them up afterwards.
+ * after call, the caller has no clean up to do.
  *
- * frame_size: in bytes, including variables, return address and stack alignment padding (Constant, stored in Frame)
+ * frame_size: in bytes, including return address, variables, and stack alignment padding (Constant, stored in Frame)
  * rsp_displacement: in bytes, signifies current rsp movement relative to current function's return address (Mutable, stored in State)
  */
 
 #[derive(Debug)]
 struct Frame {
     name: Ident,
-    convention: CallingConvention,
+    // convention: CallingConvention,
     params: Vec<ir::Var>,
     local_variables_count: usize,
     variables_mapping: VecMap<ir::Var, Var>, // var -> offset wrt RBP (frame)
@@ -435,7 +457,12 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(name: Ident, _stack_parameters_count: usize, variables: HashSet<ir::Var>) -> Self {
+    fn new(
+        name: Ident,
+        _stack_parameters_count: usize,
+        params: Vec<ir::Var>,
+        variables: HashSet<ir::Var>,
+    ) -> Self {
         eprintln!("Creating frame with variables: {:?}", variables);
         let variables_mapping = variables
             .into_iter()
@@ -446,20 +473,20 @@ impl Frame {
 
         Self {
             name,
-            convention: CallingConvention::StackVars,
+            // convention: CallingConvention::StackVars,
             local_variables_count: variables_mapping.len(),
             frame_size: ((variables_mapping.len() + 1/*retaddr*/) * QUADWORD_SIZE + QUADWORD_SIZE)
                 / 16
                 * 16, /*stack alignment*/
             variables_mapping,
-            params: vec![],
+            params,
         }
     }
 
-    fn new_cdecl(name: Ident, params: Vec<ir::Var>) -> Self {
+    fn new_ffi(name: Ident, params: Vec<ir::Var>) -> Self {
         Self {
             name,
-            convention: CallingConvention::Cdecl,
+            // convention: CallingConvention::Cdecl,
             local_variables_count: 0,
             variables_mapping: VecMap::new(),
             frame_size: RETADDR_SIZE,
@@ -477,16 +504,29 @@ impl Frame {
         res
     }
 
-    fn get_variable_offset_relative_to_retaddr(&self, variable: ir::Var) -> isize {
-        //              by frame   by rsp
-        // BASE_RET_ADDR - +8    -  +24
-        // a             -  0    -  +16
-        // b             - -8    -  +8
-        // RET_ADDR      - -16   -   0
-        // frame_size = 24
-        // b <- frame - -8
+    fn get_variable_offset_relative_to_frame_end(&self, variable: ir::Var) -> isize {
+        //                  by frame   by rsp
+        // RET_ADDR         - +8    -  +24
+        // a                -  0    -  +16
+        // b                - -8    -  +8
+        // (alignment)      - -16   -   0
+        // CALLEE_RET_ADDR  - -24   -  -8
+        // frame_size = 32
+        // b <- frame + -8
+
+        //                  by frame   by rsp
+        // RET_ADDR         - +8    -  +40
+        // a                -  0    -  +32
+        // b                - -8    -  +24
+        // c                - -16   -  +16
+        // d                - -24   -  +8
+        // (alignment)      - -32   -   0
+        // CALLEE_RET_ADDR  - -40   -  -8
+        // frame_size = 48
+        // b <- frame + -8
         let res = self.get_variable_offset_relative_to_frame(variable) + self.frame_size as isize
-            - RETADDR_SIZE as isize;
+            - RETADDR_SIZE as isize
+            - QUADWORD_SIZE as isize;
         // eprintln!("Queried {:?} retaddr offset, got {}.", variable, res);
         res
     }
@@ -496,7 +536,7 @@ impl Frame {
         variable: ir::Var,
         rsp_displacement: isize,
     ) -> isize {
-        let res = self.get_variable_offset_relative_to_retaddr(variable) + rsp_displacement;
+        let res = self.get_variable_offset_relative_to_frame_end(variable) + rsp_displacement;
         // eprintln!(
         //     "Queried {:?} offset relative to rsp, got {}.",
         //     variable, res
@@ -557,7 +597,7 @@ impl CFG {
                     (
                         func.clone(),
                         match convention {
-                            CallingConvention::StackVars => {
+                            CallingConvention::SimpleCdecl => {
                                 let mut variables = self.variables_in_function(func);
                                 variables.extend(params);
                                 Frame::new(
@@ -566,11 +606,12 @@ impl CFG {
                                         params.len() as isize - ARGS_IN_REGISTERS as isize,
                                         0,
                                     ) as usize,
+                                    params.clone(),
                                     variables,
                                 )
                             }
-                            CallingConvention::Cdecl => {
-                                Frame::new_cdecl(func.clone(), params.clone())
+                            CallingConvention::CdeclFFI => {
+                                Frame::new_ffi(func.clone(), params.clone())
                             }
                         },
                     )
@@ -583,7 +624,7 @@ impl CFG {
         writeln!(out, "\nsection .text")?;
         emit_vsts(out, &self.classes)?;
 
-        emit_header(out, &mut state, frames.get(&REAL_MAIN.to_string()).unwrap())?;
+        emit_header(out)?;
 
         let mut emitted = HashSet::new();
 
@@ -594,8 +635,8 @@ impl CFG {
             },
         ) in self.functions.iter()
         {
-            if matches!(convention, CallingConvention::StackVars) {
-                assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
+            if matches!(convention, CallingConvention::SimpleCdecl) {
+                // assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
                 let func_label = Label::Named(func.clone());
 
                 eprintln!("\nEmitting function: {}", func);
@@ -641,10 +682,14 @@ impl CFG {
         block_label.emit(out)?;
         eprintln!("Emitting ir block: {:?} as {}", func_block, block_label);
 
-        self[func_block].emit(self, out, frames, frame, state)?;
+        self[func_block].emit(self, out, frame, state)?;
 
         match &self[func_block].end_type {
             Some(EndType::Return(None)) | None => {
+                let stack_growth = frame.frame_size - RETADDR_SIZE;
+                if stack_growth != 0 {
+                    state.leave().emit(out)?;
+                }
                 Instr::Ret.emit(out)?;
             }
             Some(EndType::Return(Some(val))) => {
@@ -655,6 +700,10 @@ impl CFG {
                         Val::Mem(frame.get_variable_mem(*var, state.rsp_displacement)),
                     )
                     .emit(out)?,
+                }
+                let stack_growth = frame.frame_size - RETADDR_SIZE;
+                if stack_growth != 0 {
+                    state.leave().emit(out)?;
                 }
                 Instr::Ret.emit(out)?;
             }
@@ -732,13 +781,48 @@ impl BasicBlock {
         &self,
         cfg: &CFG,
         out: &mut impl Write,
-        frames: &HashMap<Ident, Frame>,
         frame: &Frame,
         state: &mut AsmGenState,
     ) -> AsmGenResult {
-        for quadruple in self.quadruples.iter() {
-            quadruple.emit(cfg, out, frames, frame, state)?;
+        if matches!(self.kind, BasicBlockKind::Initial) {
+            state.enter_frame(frame.frame_size);
+            let stack_growth = frame.frame_size - RETADDR_SIZE;
+            if stack_growth != 0 {
+                state.reset_rsp().emit(out)?;
+            }
+
+            // Params in registers
+            for (var, reg) in frame.params.iter().copied().zip(params_registers()) {
+                Instr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), reg)
+                    .emit(out)?;
+            }
+            // Params on the stack
+            for (no, var) in frame
+                .params
+                .iter()
+                .copied()
+                .skip(params_registers().count())
+                .enumerate()
+            {
+                Instr::MovToReg(
+                    RAX,
+                    Val::Mem(Mem {
+                        word_len: WordLen::Qword,
+                        base: RSP,
+                        index: None,
+                        displacement: Some((frame.frame_size + no * QUADWORD_SIZE) as isize),
+                    }),
+                )
+                .emit(out)?;
+                Instr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), RAX)
+                    .emit(out)?;
+            }
         }
+
+        for quadruple in self.quadruples.iter() {
+            quadruple.emit(cfg, out, frame, state)?;
+        }
+
         Ok(())
     }
 }
@@ -748,7 +832,6 @@ impl Quadruple {
         &self,
         cfg: &CFG,
         out: &mut impl Write,
-        frames: &HashMap<Ident, Frame>,
         frame: &Frame,
         state: &mut AsmGenState,
     ) -> AsmGenResult {
@@ -859,31 +942,69 @@ impl Quadruple {
 
             Quadruple::Call(dst, func, args) => {
                 let cfg_function = cfg.functions.get(func).unwrap();
-                let callee_params = &cfg_function.params;
                 let callee_convention = &cfg_function.convention;
                 match callee_convention {
-                    CallingConvention::StackVars => {
-                        let callee_frame = frames.get(func).unwrap();
-                        let stack_growth = callee_frame.frame_size - RETADDR_SIZE;
-
-                        if stack_growth != 0 {
-                            state.advance_rsp(stack_growth as isize).emit(out)?;
+                    CallingConvention::SimpleCdecl => {
+                        // Params in registers
+                        for (reg, arg) in params_registers().zip(args.iter().copied()) {
+                            Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
+                                .emit(out)?;
                         }
 
-                        // place arguments in corresponding callee's variables
-                        for (arg, param) in args.iter().copied().zip(callee_params.iter().copied())
-                        {
-                            Instr::MovToReg(RAX, frame.get_val(arg, state.rsp_displacement))
+                        let params_on_the_stack_num = usize::max(
+                            (args.len() as isize - params_registers().count() as isize) as usize,
+                            0,
+                        );
+
+                        let stack_alignment_growth = if params_on_the_stack_num % 2 != 0 {
+                            QUADWORD_SIZE
+                        } else {
+                            0
+                        }; // stack alignment
+
+                        if stack_alignment_growth != 0 {
+                            state
+                                .advance_rsp(stack_alignment_growth as isize)
                                 .emit(out)?;
+                        }
+
+                        // Params on the stack
+                        for arg in args.iter().copied().skip(params_registers().count()).rev() {
+                            Instr::Push(frame.get_val(arg, state.rsp_displacement)).emit(out)?;
+                            state.rsp_displacement += QUADWORD_SIZE as isize;
+
+                            /* Instr::MovToReg(RAX, frame.get_val(arg, state.rsp_displacement))
+                                .emit(out)?;
+
                             Instr::MovToMem(
-                                callee_frame.get_variable_mem(param, -(RETADDR_SIZE as isize)),
+                                Mem {
+                                    word_len: WordLen::Qword,
+                                    base: RSP,
+                                    index: None,
+                                    displacement: Some(
+                                        -((QUADWORD_SIZE + no * QUADWORD_SIZE) as isize),
+                                    ),
+                                },
                                 RAX,
                             )
-                            .emit(out)?;
+                            .emit(out)?; */
                         }
+
+                        // // place arguments in corresponding callee's variables
+                        // for (arg, param) in args.iter().copied().zip(callee_params.iter().copied())
+                        // {
+                        //     Instr::MovToReg(RAX, frame.get_val(arg, state.rsp_displacement))
+                        //         .emit(out)?;
+                        //     Instr::MovToMem(
+                        //         callee_frame.get_variable_mem(param, -(RETADDR_SIZE as isize)),
+                        //         RAX,
+                        //     )
+                        //     .emit(out)?;
+                        // }
+
                         Instr::Call(Label::Named(func.clone())).emit(out)?;
 
-                        if stack_growth != 0 {
+                        if stack_alignment_growth != 0 || params_on_the_stack_num > 0 {
                             state.reset_rsp().emit(out)?;
                         }
 
@@ -891,7 +1012,7 @@ impl Quadruple {
                         Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                             .emit(out)?;
                     }
-                    CallingConvention::Cdecl => {
+                    CallingConvention::CdeclFFI => {
                         // place arguments in corresponding registers
                         for (arg, reg) in args.iter().copied().zip(params_registers()) {
                             Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
@@ -899,7 +1020,7 @@ impl Quadruple {
                         }
 
                         // stack alignment, as no params on the stack
-                        Instr::Sub(RSP, Val::Instant(Instant(8))).emit(out)?;
+                        // Instr::Sub(RSP, Val::Instant(Instant(8))).emit(out)?;
 
                         // // sanity alignment check
                         // // before call, the stack must be aligned to 0 mod 16
@@ -913,7 +1034,7 @@ impl Quadruple {
 
                         Instr::Call(Label::Named(func.clone())).emit(out)?;
 
-                        Instr::Add(RSP, Val::Instant(Instant(8))).emit(out)?;
+                        // Instr::Add(RSP, Val::Instant(Instant(8))).emit(out)?;
 
                         // Save return value
                         Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
@@ -999,7 +1120,7 @@ impl Quadruple {
     }
 }
 
-fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame) -> AsmGenResult {
+fn emit_header(out: &mut impl Write) -> AsmGenResult {
     for (func, _) in INITIAL_FUNCS.iter() {
         writeln!(out, "extern {}", func)?;
     }
@@ -1008,20 +1129,20 @@ fn emit_header(out: &mut impl Write, state: &mut AsmGenState, main_frame: &Frame
 
     writeln!(out, "\nglobal main\n")?;
 
-    Label::Named(Ident::from("main".to_string())).emit(out)?;
+    // Label::Named(Ident::from("main".to_string())).emit(out)?;
 
-    let stack_growth = main_frame.frame_size - RETADDR_SIZE;
-    if stack_growth != 0 {
-        state.advance_rsp(stack_growth as isize).emit(out)?;
-    }
+    // let stack_growth = main_frame.frame_size - RETADDR_SIZE;
+    // if stack_growth != 0 {
+    //     state.advance_rsp(stack_growth as isize).emit(out)?;
+    // }
 
-    Instr::Call(Label::Named(Ident::from(REAL_MAIN.to_string()))).emit(out)?;
+    // Instr::Call(Label::Named(Ident::from(REAL_MAIN.to_string()))).emit(out)?;
 
-    if stack_growth != 0 {
-        state.reset_rsp().emit(out)?;
-    }
+    // if stack_growth != 0 {
+    //     state.reset_rsp().emit(out)?;
+    // }
 
-    Instr::Ret.emit(out)?;
+    // Instr::Ret.emit(out)?;
 
     // Label::Func(Ident::from("_notaligned")).emit(out)?;
     // Instr::MovToReg(RDI, Val::Instant(Instant(66))).emit(out)?;

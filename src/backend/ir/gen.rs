@@ -14,7 +14,6 @@ fn mangle_method(name: &str, class: &str) -> Ident {
 }
 
 pub(crate) const CONCAT_STRINGS_FUNC: &str = "__concat_strings";
-pub(crate) const REAL_MAIN: &str = "__real_main";
 pub(crate) const NEW_FUNC: &str = "__new";
 pub(crate) const SELF: &str = "self";
 
@@ -48,7 +47,7 @@ impl CFG {
                 (
                     name,
                     IrFunction {
-                        convention: CallingConvention::Cdecl,
+                        convention: CallingConvention::CdeclFFI,
                         entry: None,
                         params: fun_type
                             .params
@@ -74,21 +73,18 @@ impl CFG {
 
     fn new_function(
         &mut self,
-        mut id: Ident,
+        id: Ident,
         fun_type: FunType,
         param_vars: Vec<Var>,
         self_var: Option<Var>,
     ) {
-        if id == "main" {
-            id = REAL_MAIN.into();
-        }
         self.current_func = id.clone();
         let entry = self.new_block(BasicBlockKind::Initial);
         self.functions
             .insert(
                 id,
                 IrFunction {
-                    convention: CallingConvention::StackVars,
+                    convention: CallingConvention::SimpleCdecl,
                     entry: Some(entry),
                     typ: fun_type,
                     params: param_vars,
@@ -213,7 +209,7 @@ impl BasicBlock {
         Self {
             _func: Ident::new(),
             _idx: idx,
-            _kind: kind,
+            kind,
             entry: false,
             quadruples: vec![],
             successors: vec![],
@@ -231,7 +227,7 @@ impl BasicBlock {
         if let Some(ref old_end_type) = self.end_type {
             eprintln!(
                 "WARNING: replacing end_type for block {} (kind {:?}); it was {:?}, now {:?}",
-                self._idx.0, self._kind, old_end_type, new_end_type
+                self._idx.0, self.kind, old_end_type, new_end_type
             )
         }
         self.end_type = Some(new_end_type);
@@ -1461,15 +1457,9 @@ impl LVal {
                     .map(|arg| arg.ir_fut().ir(cfg, state, None))
                     .collect();
                 let retvar = state.fresh_reg(typ.unwrap_or(VarType::INT));
-                cfg.current_mut().quadruples.push(Quadruple::Call(
-                    retvar,
-                    if name == "main" {
-                        REAL_MAIN.into()
-                    } else {
-                        name.clone()
-                    },
-                    args,
-                ));
+                cfg.current_mut()
+                    .quadruples
+                    .push(Quadruple::Call(retvar, name.clone(), args));
                 Loc::Var(retvar)
             }
 

@@ -17,3 +17,4 @@ lattests
 tests/gen
 solution_front
 solution_back
+.gdb_history
