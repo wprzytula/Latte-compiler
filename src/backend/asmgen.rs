@@ -9,9 +9,9 @@ use vector_map::VecMap;
 use crate::frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS};
 
 use super::ir::{
-    self, BasicBlock, BasicBlockIdx, BasicBlockKind, BinOpType, CallingConvention, Class, EndType,
-    Instant, Ir, IrFunction, Quadruple, RelOpType, StringLiteral, UnOpType, CFG,
-    CONCAT_STRINGS_FUNC, NEW_FUNC,
+    self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, Class, EndType, Instant, Ir,
+    IrFunction, Method, Quadruple, RelOpType, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC,
+    NEW_FUNC,
 };
 
 const ARGS_IN_REGISTERS: usize = 6;
@@ -1171,25 +1171,26 @@ fn emit_string_literals(out: &mut impl Write, string_literals: &Vec<String>) -> 
 fn emit_vsts(out: &mut impl Write, classes: &[Class]) -> AsmGenResult {
     for class in classes {
         Label::Named(class.vst_name()).emit(out)?;
-        let sorted_methods = {
-            let mut vec = class
-                .methods
-                .values()
-                .map(
-                    |ir::Method {
-                         mangled_name: name,
-                         idx,
-                         ..
-                     }| (name, idx),
-                )
-                .collect::<Vec<_>>();
-            vec.sort_unstable();
-            vec.into_iter().map(|(name, _)| name)
-        };
-        for mangled_name in sorted_methods {
+        for mangled_name in methods_sorted_by_idx(class.methods.values()) {
             writeln!(out, "\tdq {}", mangled_name)?;
         }
     }
     writeln!(out, "")?;
     Ok(())
+}
+
+fn methods_sorted_by_idx<'a>(
+    methods: impl Iterator<Item = &'a Method>,
+) -> impl Iterator<Item = &'a String> {
+    let mut vec = methods
+        .map(
+            |ir::Method {
+                 mangled_name: name,
+                 idx,
+                 ..
+             }| (name, idx),
+        )
+        .collect::<Vec<_>>();
+    vec.sort_unstable_by_key(|(_, &idx)| idx);
+    vec.into_iter().map(|(name, _)| name)
 }
