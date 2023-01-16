@@ -4,6 +4,7 @@ use std::{
     io::{self, Write},
 };
 
+use log::{debug, info, trace};
 use vector_map::VecMap;
 
 use crate::frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS};
@@ -285,21 +286,21 @@ impl AsmGenState {
         let calltime_rsp_position = -((frame_size - RETADDR_SIZE) as isize);
         self.calltime_rsp_position = calltime_rsp_position;
         self.rsp_displacement = calltime_rsp_position;
-        eprintln!(
+        trace!(
             "Entering frame, so RSP gets displacement {}",
             -calltime_rsp_position
         );
     }
 
     fn advance_rsp(&mut self, displacement: isize) -> Instr {
-        eprintln!("Advancing RSP with displacement {}", -displacement);
+        trace!("Advancing RSP with displacement {}", -displacement);
         self.rsp_displacement += displacement;
         Instr::Sub(RSP, Val::Instant(Instant(displacement as i64)))
     }
 
     fn reset_rsp(&mut self) -> Instr {
         let rsp_displacement = self.rsp_displacement;
-        eprintln!("Resetting RSP with displacement {}", rsp_displacement);
+        trace!("Resetting RSP with displacement {}", rsp_displacement);
         self.rsp_displacement = 0;
         Instr::Add(RSP, Val::Instant(Instant(rsp_displacement as i64)))
     }
@@ -463,13 +464,13 @@ impl Frame {
         params: Vec<ir::Var>,
         variables: HashSet<ir::Var>,
     ) -> Self {
-        eprintln!("Creating frame with variables: {:?}", variables);
+        debug!("Creating frame with variables: {:?}", variables);
         let variables_mapping = variables
             .into_iter()
             .enumerate()
             .map(|(k, var)| (var, Var(k as isize * -8)))
             .collect::<VecMap<_, _>>();
-        eprintln!("Variables got mappings: {:?}", &variables_mapping);
+        trace!("Variables got mappings: {:?}", &variables_mapping);
 
         Self {
             name,
@@ -500,7 +501,7 @@ impl Frame {
             .get(&variable)
             .unwrap_or_else(|| panic!("{:?} not registered in frame: {:#?}.", variable, self))
             .0;
-        // eprintln!("Queried {:?} frame offset, got {}.", variable, res);
+        // trace!("Queried {:?} frame offset, got {}.", variable, res);
         res
     }
 
@@ -527,7 +528,7 @@ impl Frame {
         let res = self.get_variable_offset_relative_to_frame(variable) + self.frame_size as isize
             - RETADDR_SIZE as isize
             - QUADWORD_SIZE as isize;
-        // eprintln!("Queried {:?} retaddr offset, got {}.", variable, res);
+        // trace!("Queried {:?} retaddr offset, got {}.", variable, res);
         res
     }
 
@@ -537,7 +538,7 @@ impl Frame {
         rsp_displacement: isize,
     ) -> isize {
         let res = self.get_variable_offset_relative_to_frame_end(variable) + rsp_displacement;
-        // eprintln!(
+        // trace!(
         //     "Queried {:?} offset relative to rsp, got {}.",
         //     variable, res
         // );
@@ -565,9 +566,7 @@ impl Frame {
 
 impl Ir {
     pub fn emit_assembly(&self, out: &mut impl Write) -> AsmGenResult {
-        eprintln!(
-            "\n\n#################################################\n---- ASSEMBLY EMITTING ----\n"
-        );
+        info!("---- ASSEMBLY EMITTING ----");
         self.cfg.emit_assembly(out, &self.string_literals)
     }
 }
@@ -583,7 +582,7 @@ impl CFG {
 
         let mut state = AsmGenState::new();
 
-        eprintln!("Building frames");
+        info!("Building frames");
         let frames = self
             .functions
             .iter()
@@ -619,7 +618,7 @@ impl CFG {
             )
             .collect::<HashMap<_, _>>();
 
-        eprintln!("Built frames: {:#?}\n\n", &frames);
+        debug!("Built frames: {:#?}", &frames);
 
         writeln!(out, "\nsection .text")?;
         emit_vsts(out, &self.classes)?;
@@ -640,7 +639,7 @@ impl CFG {
                 // assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
                 let func_label = Label::Named(func.clone());
 
-                eprintln!("\nEmitting function: {}", func);
+                info!("Emitting function: {}", func);
                 writeln!(out, "")?;
                 func_label.emit(out)?;
 
@@ -703,7 +702,7 @@ impl CFG {
         next_l: Option<&Label>,
     ) -> AsmGenResult {
         if emitted.contains(&func_block) {
-            eprintln!(
+            trace!(
                 "Block: {:?} has already been emitted; returning.",
                 func_block
             );
@@ -714,7 +713,7 @@ impl CFG {
 
         let block_label = state.get_block_label(func_block);
         block_label.emit(out)?;
-        eprintln!("Emitting ir block: {:?} as {}", func_block, block_label);
+        debug!("Emitting ir block: {:?} as {}", func_block, block_label);
 
         self[func_block].emit(self, out, frame, state)?;
 

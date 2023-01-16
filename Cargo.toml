@@ -22,3 +22,6 @@ smallvec = "1.10"
 vector-map = "1.0.1"
 lazy_static = "1.4.0"
 hashbrown = "0.13"
+
+log = "0.4.17"
+env_logger = "0.10.0"

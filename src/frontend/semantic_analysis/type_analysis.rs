@@ -968,7 +968,7 @@ impl LVal {
 impl Expr {
     fn type_check(&self, env: &Env) -> Result<(DataType, Option<Constexpr>), TypeCheckError> {
         // (type, consteval)
-        // eprintln!("type checking expr: {:#?}", self);
+        // trace!("type checking expr: {:#?}", self);
         let pos = self.0;
         let typ = match &self.1 {
             ExprInner::IntLit(i) => Ok((

@@ -26,6 +26,7 @@ impl Debug for Error {
 }
 
 fn main() -> Result<(), Error> {
+    env_logger::builder().format_timestamp(None).init();
     let filename = std::env::args().nth(1).expect("Filename arg missing");
 
     let (mut parser, was_error) = build_parser(&filename);

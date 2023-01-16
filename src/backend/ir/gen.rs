@@ -1,5 +1,6 @@
 use either::Either;
 use enum_as_inner::EnumAsInner;
+use log::{debug, info, trace, warn};
 
 use std::{fmt, iter};
 
@@ -113,7 +114,7 @@ impl CFG {
 
     fn make_current(&mut self, idx: BasicBlockIdx, who: &str) {
         self.current_block_idx = idx;
-        eprintln!("{}: Made {} current block.", who, idx.0);
+        trace!("{}: Made {} current block.", who, idx.0);
     }
 
     /// Called only for function with our call conventions, i.e. emitted by the compiler.
@@ -156,7 +157,7 @@ impl CFG {
             .collect::<Vec<_>>();
         let mut visited = vec![];
         for entry in entries {
-            // eprintln!("\nIn linking succ and pred, so far visited: {:?}", visited);
+            // trace!("\nIn linking succ and pred, so far visited: {:?}", visited);
             visited.clear();
             self.dfs_linking(entry, &mut visited);
         }
@@ -183,25 +184,6 @@ impl CFG {
             Some(EndType::Return(_)) | None => (), // function end,
         };
     }
-
-    fn resolve_method_base(
-        &self,
-        mut current_class: ClassIdx,
-        method: &Ident,
-    ) -> (ClassIdx, Ident) {
-        loop {
-            if let Some(Method { mangled_name, .. }) =
-                self.classes[current_class.0].methods.get(method)
-            {
-                return (current_class, mangled_name.clone());
-            } else {
-                match self.classes[current_class.0].base_idx {
-                    None => unreachable!(),
-                    Some(base_class) => current_class = base_class,
-                }
-            }
-        }
-    }
 }
 
 impl BasicBlock {
@@ -225,7 +207,7 @@ impl BasicBlock {
 
     fn set_end_type(&mut self, new_end_type: EndType) {
         if let Some(ref old_end_type) = self.end_type {
-            eprintln!(
+            warn!(
                 "WARNING: replacing end_type for block {} (kind {:?}); it was {:?}, now {:?}",
                 self._idx.0, self.kind, old_end_type, new_end_type
             )
@@ -328,6 +310,7 @@ impl BasicBlock {
 mod state {
     use std::ops::{Deref, DerefMut};
 
+    use log::{debug, info};
     use rpds::RedBlackTreeMap as Map;
     use vector_map::VecMap;
 
@@ -431,7 +414,7 @@ mod state {
         }
 
         pub(crate) fn declare_var(&mut self, id: Ident, variable_kind: VariableKind) {
-            eprintln!("Declared var: {} -> {:?}", &id, variable_kind);
+            debug!("Declared var: {} -> {:?}", &id, variable_kind);
             self.var_location.insert_mut(id, variable_kind);
         }
 
@@ -451,7 +434,7 @@ mod state {
             if let Some(idx) = self.class_mapping.get(&class) {
                 *idx
             } else {
-                eprintln!("Registered class {}", &class);
+                info!("Registered class {}", &class);
                 let class_idx = ClassIdx(self.next_class_num);
                 self.next_class_num += 1;
                 self.class_mapping.insert(class, class_idx);
@@ -478,7 +461,7 @@ impl Program {
         Self::ir_for_functions(&mut cfg, &mut state, &self.0);
 
         cfg.link_succ_and_pred();
-        // eprintln!("BEFORE SSA: max var = {}", state.fresh_reg(None).0);
+        // debug!("BEFORE SSA: max var = {}", state.fresh_reg(None).0);
         // cfg.make_ssa(&mut state);
         // cfg.optimise_ssa();
         Ir {
@@ -488,7 +471,7 @@ impl Program {
     }
 
     fn ir_for_classes(cfg: &mut CFG, state: &mut State, class_defs: &[ClassDef]) {
-        eprintln!("\n\tRegistering classes:");
+        info!("Registering classes:");
         // Register classes
         for ClassDef {
             class, base_class, ..
@@ -503,7 +486,7 @@ impl Program {
                 .push(Class::new(class.clone(), class_idx, base_idx));
         }
 
-        eprintln!("\n\tDeclaring fields:");
+        info!("Declaring fields:");
         // Declare fields
         for ClassDef {
             class: class_name,
@@ -541,7 +524,7 @@ impl Program {
             }
         }
 
-        eprintln!("\n\tDeclaring methods:");
+        info!("Declaring methods:");
         // Declare methods
         for ClassDef {
             class: class_name,
@@ -604,7 +587,7 @@ impl Program {
             }
         }
 
-        eprintln!("\n\tDefining methods:");
+        info!("Defining methods:");
         // Declare fields and define methods
         for ClassDef {
             class: class_name,
@@ -670,7 +653,7 @@ impl Program {
                         // current_func to properly name blocks
                         cfg.current_func = mangled_name.clone();
 
-                        eprintln!("\nEmitting IR for method: {}:{}", class_name, &method.name);
+                        debug!("Emitting IR for method: {}:{}", class_name, &method.name);
                         cfg.make_current(ir_func.entry.unwrap(), "Defining methods");
                         method.block.ir(cfg, method_state);
                     }
@@ -688,7 +671,7 @@ impl Program {
                     .map(|param| (param.name.clone(), param.type_.clone())),
             );
             cfg.new_function(func.name.clone(), func.fun_type(), param_vars, None);
-            eprintln!("\nEmitting IR for function: {}", &func.name);
+            debug!("\nEmitting IR for function: {}", &func.name);
             func.block.ir(cfg, &mut state.new_scope());
         }
     }
@@ -798,9 +781,10 @@ impl Stmt {
 
             StmtInner::Return(expr) => {
                 let reg = expr.ir_fut().ir(cfg, state, None);
-                eprintln!(
+                trace!(
                     "Because of Return, setting {} end_type to Return({:?})",
-                    cfg.current_block_idx.0, reg
+                    cfg.current_block_idx.0,
+                    reg
                 );
                 cfg.current_mut().set_end_type(EndType::Return(Some(reg)));
                 true
@@ -997,7 +981,7 @@ fn make_conditional_context(cfg: &mut CFG, state: &mut State) -> (ConditionalCon
         block_false: else_block,
         block_next: next_block,
     };
-    eprintln!("Made cond ctx: {:#?}.", ctx);
+    trace!("Made cond ctx: {:#?}.", ctx);
 
     (ctx, res)
 }
@@ -1050,9 +1034,12 @@ fn finish_cond_ctx_leaf(
             cond_ctx.block_true,
             cond_ctx.block_false,
         ));
-        eprintln!(
+        trace!(
             "Because of {}, set {} end_type to IfElse(then: {}, else: {}).",
-            from, cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
+            from,
+            cond_ctx.pre_block.0,
+            cond_ctx.block_true.0,
+            cond_ctx.block_false.0
         );
         None
     } else {
@@ -1067,7 +1054,7 @@ impl Expr {
     }
 
     fn ir_fut(&self) -> ValueFut {
-        // eprintln!("ir_fut of {:#?}", &self.debug_surface());
+        // trace!("ir_fut of {:#?}", &self.debug_surface());
         match match &self.1 {
             ExprInner::IntLit(i) => Some(Instant(*i)),
             ExprInner::BoolLit(b) => Some(Instant::bool(*b)),
@@ -1133,7 +1120,7 @@ impl Expr {
         state: &mut State,
         cond_ctx: Option<ConditionalContext>,
     ) -> Option<Var> {
-        // eprintln!(
+        // trace!(
         //    "ir of {:#?} with cond_ctx {:?}",
         //     &self.debug_surface(),
         //     cond_ctx
@@ -1221,9 +1208,11 @@ impl Expr {
                                 cond_ctx.block_true,
                                 cond_ctx.block_false,
                             ));
-                            eprintln!(
+                            trace!(
                                 "Because of RelOp, set {} end_type to IfElse(then: {}, else: {}).",
-                                cond_ctx.pre_block.0, cond_ctx.block_true.0, cond_ctx.block_false.0
+                                cond_ctx.pre_block.0,
+                                cond_ctx.block_true.0,
+                                cond_ctx.block_false.0
                             );
                             cfg.make_current(cond_ctx.block_next, "RelOp");
 

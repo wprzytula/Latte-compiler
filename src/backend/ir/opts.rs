@@ -5,7 +5,7 @@ use super::{gen::State, BasicBlockIdx, EndType, Loc, Mem, Quadruple, Value, Var,
 fn rename_var(var: &mut Var, prev: Var, current: Var) {
     if *var == prev {
         *var = current;
-        eprintln!("Renaming usage Var {} -> {}", prev.0, current.0);
+        debug!("Renaming usage Var {} -> {}", prev.0, current.0);
     }
 }
 fn rename_val(val: &mut Value, prev: Var, current: Var) {
@@ -77,7 +77,7 @@ impl Quadruple {
     }
 
     fn rename_assignment(&mut self, prev: Var, current: Var) {
-        eprintln!("Renaming assignment of Var {} -> {}", prev.0, current.0);
+        debug!("Renaming assignment of Var {} -> {}", prev.0, current.0);
         assert!(self.assigns_to_var(prev));
         match self {
             Quadruple::BinOp(ass, _, _, _)

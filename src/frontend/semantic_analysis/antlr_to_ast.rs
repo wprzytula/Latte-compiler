@@ -150,7 +150,6 @@ impl<'input> ParseTreeVisitorCompat<'input> for ConverterVisitor {
             return aggregate;
         }
 
-        // eprintln!("Aggregating {:#?} with {:#?}", &aggregate, &next);
         match aggregate {
             AstElem::Default => next,
             AstElem::Aggregate(ref mut agg) => {
