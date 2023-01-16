@@ -635,6 +635,7 @@ impl CFG {
             },
         ) in self.functions.iter()
         {
+            let frame = frames.get(func).unwrap();
             if matches!(convention, CallingConvention::SimpleCdecl) {
                 // assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
                 let func_label = Label::Named(func.clone());
@@ -643,12 +644,45 @@ impl CFG {
                 writeln!(out, "")?;
                 func_label.emit(out)?;
 
+                state.enter_frame(frame.frame_size);
+                let stack_growth = frame.frame_size - RETADDR_SIZE;
+                if stack_growth != 0 {
+                    state.reset_rsp().emit(out)?;
+                }
+
+                // Params in registers
+                for (var, reg) in frame.params.iter().copied().zip(params_registers()) {
+                    Instr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), reg)
+                        .emit(out)?;
+                }
+                // Params on the stack
+                for (no, var) in frame
+                    .params
+                    .iter()
+                    .copied()
+                    .skip(params_registers().count())
+                    .enumerate()
+                {
+                    Instr::MovToReg(
+                        RAX,
+                        Val::Mem(Mem {
+                            word_len: WordLen::Qword,
+                            base: RSP,
+                            index: None,
+                            displacement: Some((frame.frame_size + no * QUADWORD_SIZE) as isize),
+                        }),
+                    )
+                    .emit(out)?;
+                    Instr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), RAX)
+                        .emit(out)?;
+                }
+
                 self.emit_function_block(
                     out,
                     entry.unwrap(),
                     &mut emitted,
                     &frames,
-                    frames.get(func).unwrap(),
+                    frame,
                     &mut state,
                     None,
                 )?;
@@ -784,41 +818,6 @@ impl BasicBlock {
         frame: &Frame,
         state: &mut AsmGenState,
     ) -> AsmGenResult {
-        if matches!(self.kind, BasicBlockKind::Initial) {
-            state.enter_frame(frame.frame_size);
-            let stack_growth = frame.frame_size - RETADDR_SIZE;
-            if stack_growth != 0 {
-                state.reset_rsp().emit(out)?;
-            }
-
-            // Params in registers
-            for (var, reg) in frame.params.iter().copied().zip(params_registers()) {
-                Instr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), reg)
-                    .emit(out)?;
-            }
-            // Params on the stack
-            for (no, var) in frame
-                .params
-                .iter()
-                .copied()
-                .skip(params_registers().count())
-                .enumerate()
-            {
-                Instr::MovToReg(
-                    RAX,
-                    Val::Mem(Mem {
-                        word_len: WordLen::Qword,
-                        base: RSP,
-                        index: None,
-                        displacement: Some((frame.frame_size + no * QUADWORD_SIZE) as isize),
-                    }),
-                )
-                .emit(out)?;
-                Instr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), RAX)
-                    .emit(out)?;
-            }
-        }
-
         for quadruple in self.quadruples.iter() {
             quadruple.emit(cfg, out, frame, state)?;
         }

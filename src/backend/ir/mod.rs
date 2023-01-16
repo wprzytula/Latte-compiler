@@ -206,7 +206,7 @@ pub enum Quadruple {
 
     VstStore(ClassIdx, Mem),
 
-    VirtualCall(Var, Var, usize, Vec<Value>),
+    VirtualCall(Var, Var, usize, Vec<Value>), // (retvar, object, method_idx, args)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
