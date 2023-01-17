@@ -42,7 +42,7 @@ impl Debug for CompilerError {
     }
 }
 
-pub fn compile(path: impl AsRef<Path>) -> Result<(), CompilerError> {
+pub fn compile(path: impl AsRef<Path>, optimisations: bool) -> Result<(), CompilerError> {
     let canonical_path = canonicalize(path)?;
     let progname = canonical_path
         .file_stem()
@@ -83,7 +83,7 @@ pub fn compile(path: impl AsRef<Path>) -> Result<(), CompilerError> {
         }
     };
 
-    let cfg = program.ir();
+    let cfg = program.ir(true, optimisations);
 
     let asm_filename = format!("{}.asm", progname);
     let asm_filepath = Path::new(parent_path).join(asm_filename);

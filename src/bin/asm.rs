@@ -55,7 +55,7 @@ fn main() -> Result<(), Error> {
                 return Err(Error::Conversion(err));
             }
         }
-        let cfg = ast.unwrap().ir();
+        let cfg = ast.unwrap().ir(true, true);
 
         let mut stdout = io::stdout();
         cfg.emit_assembly(&mut stdout)?;

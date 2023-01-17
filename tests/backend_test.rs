@@ -89,7 +89,7 @@ fn lattests_compile(good_paths: &[&str]) {
                 panic!("Type check failed: {}\n{:#?}", full_path.display(), err)
             });
 
-            compile(full_path.clone()).unwrap_or_else(|err| {
+            compile(full_path.clone(), false).unwrap_or_else(|err| {
                 panic!("Compilation failed: {}\n{:#?}", full_path.display(), err)
             });
 

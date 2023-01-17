@@ -452,7 +452,7 @@ mod state {
 }
 
 impl Program {
-    pub fn ir(&self) -> Ir {
+    pub fn ir(&self, ssa: bool, optimisations: bool) -> Ir {
         let mut state = State::new();
         let mut cfg = CFG::new(&mut state);
 
