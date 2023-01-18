@@ -671,7 +671,7 @@ impl Program {
                     .map(|param| (param.name.clone(), param.type_.clone())),
             );
             cfg.new_function(func.name.clone(), func.fun_type(), param_vars, None);
-            debug!("\nEmitting IR for function: {}", &func.name);
+            debug!("Emitting IR for function: {}", &func.name);
             func.block.ir(cfg, &mut state.new_scope());
         }
     }
