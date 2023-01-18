@@ -228,7 +228,7 @@ impl Env {
     pub fn is_subtype<'a: 'b, 'b>(&'a self, data_type: &'b DataType, base_type: &DataType) -> bool {
         match (data_type, base_type) {
             (_, DataType::TExit) => unreachable!(),
-            (DataType::TExit, _) => unreachable!(),
+            (DataType::TExit, _) => true, // TExit should match any type
             (DataType::TVoid, DataType::TVoid) => true,
             (DataType::TVoid, DataType::Nonvoid(_)) | (DataType::Nonvoid(_), DataType::TVoid) => {
                 false
