@@ -4,6 +4,7 @@
 
 void error() {
     printf("runtime error\n");
+    exit(1);
 }
 
 void printInt(long long i) {
