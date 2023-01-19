@@ -682,7 +682,7 @@ impl Block {
         self.1
             .iter()
             .map(|stmt| stmt.ir(cfg, state))
-            .any(|definitive_return| definitive_return)
+            .any(|(definitive_return, _)| definitive_return)
     }
 }
 
@@ -714,12 +714,13 @@ impl<'a> ValueFut<'a> {
 }
 
 impl Stmt {
-    fn ir(&self, cfg: &mut CFG, state: &mut State) -> bool {
+    fn ir(&self, cfg: &mut CFG, state: &mut State) -> (bool, BasicBlockIdx) {
         match &self.1 {
-            StmtInner::Empty => false,
-
-            StmtInner::Block(block) => block.ir(cfg, &mut state.new_scope()),
-
+            StmtInner::Empty => (false, cfg.current_block_idx),
+            StmtInner::Block(block) => {
+                let definitive_return = block.ir(cfg, &mut state.new_scope());
+                (definitive_return, cfg.current_block_idx)
+            }
             StmtInner::VarDecl(decls) => {
                 for decl in decls.decls.iter() {
                     let var = state.fresh_reg(decls.type_.clone().into());
@@ -742,7 +743,7 @@ impl Stmt {
                     }
                     state.declare_var(decl.name.clone(), VariableKind::StackVar(var));
                 }
-                false
+                (false, cfg.current_block_idx)
             }
 
             StmtInner::Ass(lval, rval) => {
@@ -760,7 +761,7 @@ impl Stmt {
                     }
                 };
                 cfg.current_mut().quadruples.push(quadruple);
-                false
+                (false, cfg.current_block_idx)
             }
 
             StmtInner::Incr(lval) => {
@@ -768,7 +769,7 @@ impl Stmt {
                 cfg.current_mut()
                     .quadruples
                     .push(Quadruple::InPlaceUnOp(InPlaceUnOpType::Inc, lval));
-                false
+                (false, cfg.current_block_idx)
             }
 
             StmtInner::Decr(lval) => {
@@ -776,7 +777,7 @@ impl Stmt {
                 cfg.current_mut()
                     .quadruples
                     .push(Quadruple::InPlaceUnOp(InPlaceUnOpType::Dec, lval));
-                false
+                (false, cfg.current_block_idx)
             }
 
             StmtInner::Return(expr) => {
@@ -786,12 +787,16 @@ impl Stmt {
                     cfg.current_block_idx.0,
                     reg
                 );
-                cfg.current_mut().set_end_type(EndType::Return(Some(reg)));
-                true
+                cfg.current_mut()
+                    .end_type
+                    .get_or_insert(EndType::Return(Some(reg)));
+                (true, cfg.current_block_idx)
             }
             StmtInner::VoidReturn => {
-                cfg.current_mut().set_end_type(EndType::Return(None));
-                true
+                cfg.current_mut()
+                    .end_type
+                    .get_or_insert(EndType::Return(None));
+                (true, cfg.current_block_idx)
             }
 
             StmtInner::Cond(cond, then) => {
@@ -801,7 +806,7 @@ impl Stmt {
                         if *i == 0 {
                             // condition always false
                             // skip
-                            false
+                            (false, cfg.current_block_idx)
                         } else {
                             // condition always true
                             then.ir(cfg, state)
@@ -809,7 +814,7 @@ impl Stmt {
                     }
                     ValueFut::VariableFut(cond) => {
                         let pre_block = cfg.current_block_idx;
-                        let then_block = cfg.new_block(BasicBlockKind::IfThen);
+                        let then_fst_block = cfg.new_block(BasicBlockKind::IfThen);
                         let next_block = cfg.new_block(BasicBlockKind::IfNext);
 
                         cond.ir(
@@ -817,7 +822,7 @@ impl Stmt {
                             state,
                             Some(ConditionalContext {
                                 pre_block,
-                                block_true: then_block,
+                                block_true: then_fst_block,
                                 block_false: next_block,
                                 block_next: next_block,
                             }),
@@ -825,19 +830,18 @@ impl Stmt {
                         .ok_or(())
                         .unwrap_err(); // we should not return any var from the cond
 
-                        cfg.make_current(then_block, "Cond then");
-                        then.ir(cfg, state);
+                        cfg.make_current(then_fst_block, "Cond then");
+                        let (_then_definitive_return, then_last_block) = then.ir(cfg, state);
 
                         cfg.make_current(next_block, "Cond next");
 
                         // FIXME: this should be set inside cond
                         // cfg[pre_block].end_type =
                         //     Some(EndType::IfElse(cond_var, then_block, next_block));
-                        cfg[then_block]
+                        cfg[then_last_block]
                             .end_type
                             .get_or_insert(EndType::Goto(next_block));
-
-                        false
+                        (false, cfg.current_block_idx)
                     }
                 }
             }
@@ -856,8 +860,8 @@ impl Stmt {
                     }
                     ValueFut::VariableFut(cond) => {
                         let pre_block = cfg.current_block_idx;
-                        let then_block = cfg.new_block(BasicBlockKind::IfElseThen);
-                        let else_block = cfg.new_block(BasicBlockKind::IfElseElse);
+                        let then_fst_block = cfg.new_block(BasicBlockKind::IfElseThen);
+                        let else_fst_block = cfg.new_block(BasicBlockKind::IfElseElse);
                         let next_block = cfg.new_block(BasicBlockKind::IfElseNext);
 
                         cond.ir(
@@ -865,39 +869,41 @@ impl Stmt {
                             state,
                             Some(ConditionalContext {
                                 pre_block,
-                                block_true: then_block,
-                                block_false: else_block,
+                                block_true: then_fst_block,
+                                block_false: else_fst_block,
                                 block_next: next_block,
                             }),
                         )
                         .ok_or(())
                         .unwrap_err(); // we should not return any var from the cond
 
-                        cfg.make_current(then_block, "CondElse then");
-                        let then_definitive_return = then.ir(cfg, state);
+                        cfg.make_current(then_fst_block, "CondElse then");
+                        let (then_definitive_return, then_last_block) = then.ir(cfg, state);
 
-                        cfg.make_current(else_block, "CondElse else");
-                        let else_definitive_return = else_br.ir(cfg, state);
+                        cfg.make_current(else_fst_block, "CondElse else");
+                        let (else_definitive_return, else_last_block) = else_br.ir(cfg, state);
 
                         // FIXME: this should be set inside cond
                         // cfg[pre_block].end_type =
                         //     Some(EndType::IfElse(cond_var, then_block, else_block));
-                        cfg[then_block]
+                        cfg[then_last_block]
                             .end_type
                             .get_or_insert(EndType::Goto(next_block));
-                        cfg[else_block]
+                        cfg[else_last_block]
                             .end_type
                             .get_or_insert(EndType::Goto(next_block));
                         cfg.make_current(next_block, "CondElse next");
-
-                        then_definitive_return && else_definitive_return
+                        (
+                            then_definitive_return && else_definitive_return,
+                            cfg.current_block_idx,
+                        )
                     }
                 }
             }
 
             StmtInner::SExp(expr) => {
                 let _ = expr.ir_fut().ir(cfg, state, None);
-                false
+                (false, cfg.current_block_idx)
             }
 
             StmtInner::While(cond, body) => {
@@ -908,25 +914,30 @@ impl Stmt {
                         if *i == 0 {
                             // condition always false
                             // skip
-                            false
+                            (false, cfg.current_block_idx)
                         } else {
                             // condition always true
                             // make infinite loop in a new block
-                            let loop_block = cfg.new_block(BasicBlockKind::InfiniteLoop);
-                            cfg[pre_block].set_end_type(EndType::Goto(loop_block));
-                            cfg[loop_block].set_end_type(EndType::Goto(loop_block));
-                            cfg.make_current(loop_block, "While infinite loop");
-                            body.ir(cfg, state);
-
-                            true // never escapes
+                            let loop_fst_block = cfg.new_block(BasicBlockKind::InfiniteLoop);
+                            cfg[pre_block]
+                                .end_type
+                                .get_or_insert(EndType::Goto(loop_fst_block));
+                            cfg.make_current(loop_fst_block, "While infinite loop");
+                            let (_, loop_last_block) = body.ir(cfg, state);
+                            cfg[loop_last_block]
+                                .end_type
+                                .get_or_insert(EndType::Goto(loop_fst_block));
+                            (true /*never escapes*/, cfg.current_block_idx)
                         }
                     }
                     ValueFut::VariableFut(cond) => {
                         let cond_block = cfg.new_block(BasicBlockKind::WhileCond);
-                        let loop_block = cfg.new_block(BasicBlockKind::WhileBody);
+                        let loop_fst_block = cfg.new_block(BasicBlockKind::WhileBody);
                         let next_block = cfg.new_block(BasicBlockKind::WhileNext);
 
-                        cfg[pre_block].set_end_type(EndType::Goto(cond_block));
+                        cfg[pre_block]
+                            .end_type
+                            .get_or_insert(EndType::Goto(cond_block));
 
                         cfg.make_current(cond_block, "While cond");
                         cond.ir(
@@ -934,7 +945,7 @@ impl Stmt {
                             state,
                             Some(ConditionalContext {
                                 pre_block: cond_block,
-                                block_true: loop_block,
+                                block_true: loop_fst_block,
                                 block_false: next_block,
                                 block_next: next_block,
                             }),
@@ -942,12 +953,14 @@ impl Stmt {
                         .ok_or(())
                         .unwrap_err(); // we should not return any var from the cond
 
-                        cfg.make_current(loop_block, "While body");
-                        body.ir(cfg, state);
-                        cfg.current_mut().set_end_type(EndType::Goto(cond_block));
+                        cfg.make_current(loop_fst_block, "While body");
+                        let (_, loop_last_block) = body.ir(cfg, state);
+                        cfg[loop_last_block]
+                            .end_type
+                            .get_or_insert(EndType::Goto(cond_block));
 
                         cfg.make_current(next_block, "While next");
-                        false
+                        (false, cfg.current_block_idx)
                     }
                 }
             }
