@@ -76,17 +76,11 @@ pub enum BinOpType {
     Mul,
     Div,
     Mod,
-    And,
-    Or,
-    Xor,
 }
 impl BinOpType {
     pub fn is_commutative(&self) -> bool {
         match self {
-            BinOpType::Add | BinOpType::Mul | BinOpType::And | BinOpType::Or | BinOpType::Xor => {
-                true
-            }
-
+            BinOpType::Add | BinOpType::Mul => true,
             BinOpType::Sub | BinOpType::Div | BinOpType::Mod => false,
         }
     }

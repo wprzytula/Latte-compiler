@@ -875,15 +875,6 @@ impl Quadruple {
                         // mov remainder from RDX to RAX:
                         Instr::MovToReg(RAX, Val::Reg(RDX)).emit(out)?;
                     }
-                    BinOpType::And => {
-                        Instr::And(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
-                    }
-                    BinOpType::Or => {
-                        Instr::Or(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
-                    }
-                    BinOpType::Xor => {
-                        Instr::Xor(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
-                    }
                 };
                 Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?

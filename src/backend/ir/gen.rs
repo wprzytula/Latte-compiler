@@ -1244,10 +1244,7 @@ impl Expr {
                                     BinOpType::Sub
                                     | BinOpType::Mul
                                     | BinOpType::Div
-                                    | BinOpType::Mod
-                                    | BinOpType::And
-                                    | BinOpType::Or
-                                    | BinOpType::Xor => {
+                                    | BinOpType::Mod => {
                                         assert!(matches!(
                                             state.get_var_type(var).unwrap(),
                                             VarType::Simple(SimpleVarType::Int)
