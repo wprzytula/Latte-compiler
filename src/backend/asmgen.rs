@@ -147,7 +147,6 @@ impl Display for Mem {
 enum Reg {
     CallerSave(CallerSaveReg),
     CalleeSave(CalleeSaveReg),
-    Rip,
 }
 const RAX: Reg = Reg::CallerSave(CallerSaveReg::Rax);
 const RCX: Reg = Reg::CallerSave(CallerSaveReg::Rcx);
@@ -171,7 +170,6 @@ impl Display for Reg {
         match self {
             Reg::CallerSave(reg) => write!(f, "{}", reg),
             Reg::CalleeSave(reg) => write!(f, "{}", reg),
-            Reg::Rip => write!(f, "rip"),
         }
     }
 }
