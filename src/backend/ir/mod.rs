@@ -1,7 +1,7 @@
 mod gen;
 mod liveness;
 // mod opts;
-mod ra;
+// mod ra;
 
 pub(crate) use gen::{CONCAT_STRINGS_FUNC, NEW_FUNC};
 
@@ -23,7 +23,7 @@ use self::liveness::FlowAnalysis;
 use super::asmgen::QUADWORD_SIZE;
 
 #[derive(Debug, Clone, Copy, EnumAsInner)]
-pub enum Value {
+pub(crate) enum Value {
     Instant(Instant),
     Variable(Var),
 }
@@ -190,7 +190,7 @@ impl From<NonvoidType> for VarType {
 }
 
 #[derive(Debug)]
-pub enum Quadruple {
+pub(crate) enum Quadruple {
     BinOp(Var, Var, BinOpType, Value), // dst, op1, op, op2
     UnOp(Var, UnOpType, Value),        // dst, op,
     InPlaceUnOp(InPlaceUnOpType, Loc),
@@ -237,7 +237,7 @@ pub struct IrFunction {
 }
 
 #[derive(Debug)]
-pub struct CFG {
+pub(crate) struct CFG {
     pub blocks: Vec<BasicBlock>,
     current_block_idx: BasicBlockIdx,
     current_func: Ident,
@@ -260,14 +260,14 @@ impl IndexMut<BasicBlockIdx> for CFG {
 }
 
 #[derive(Debug)]
-pub enum EndType {
+pub(crate) enum EndType {
     Goto(BasicBlockIdx),
     IfElse(Var, RelOpType, Value, BasicBlockIdx, BasicBlockIdx),
     Return(Option<Value>),
 }
 
 #[derive(Debug)]
-pub enum BasicBlockKind {
+pub(crate) enum BasicBlockKind {
     Other,
     Initial,
     AfterReturn,
@@ -287,7 +287,7 @@ pub enum BasicBlockKind {
 }
 
 #[derive(Debug)]
-pub struct BasicBlock {
+pub(crate) struct BasicBlock {
     _idx: BasicBlockIdx,
     _func: Ident,
     pub kind: BasicBlockKind,
