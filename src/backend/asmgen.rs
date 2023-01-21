@@ -324,13 +324,6 @@ enum Instr {
     Jl(Label),
     Jle(Label),
 
-    Sete,
-    Setne,
-    Setl,
-    Setle,
-    Setg,
-    Setge,
-
     LoadString(Reg, StringLiteral),
     MovToReg(Reg, Val),
     MovToMem(Mem, Reg),
@@ -347,9 +340,6 @@ enum Instr {
     Dec(Loc),
     Neg(Loc),
     Not(Reg),
-    And(Reg, Val),
-    Or(Reg, Val),
-    Xor(Reg, Val),
     Sal(Reg, Instant),
     Sar(Reg, Instant),
 
@@ -357,12 +347,10 @@ enum Instr {
     LeaLabel(Reg, String),
 
     Push(Val),
-    Pop(Reg),
 
     Ret,
     Call(Label),
     CallReg(Reg),
-    Syscall,
 }
 
 impl Instr {
@@ -376,13 +364,6 @@ impl Instr {
             Instr::Jge(label) => writeln!(out, "jge {}", label),
             Instr::Jl(label) => writeln!(out, "jl {}", label),
             Instr::Jle(label) => writeln!(out, "jle {}", label),
-
-            Instr::Sete => writeln!(out, "sete cl"),
-            Instr::Setne => writeln!(out, "setne cl"),
-            Instr::Setl => writeln!(out, "setl cl"),
-            Instr::Setle => writeln!(out, "setle cl"),
-            Instr::Setg => writeln!(out, "setg cl"),
-            Instr::Setge => writeln!(out, "setge cl"),
 
             Instr::MovToReg(reg, val) => writeln!(out, "mov {}, {}", reg, val),
             Instr::MovToMem(mem, reg) => writeln!(out, "mov {}, {}", mem, reg),
@@ -399,9 +380,6 @@ impl Instr {
             Instr::Dec(reg) => writeln!(out, "dec {}", reg),
             Instr::Neg(reg) => writeln!(out, "neg {}", reg),
             Instr::Not(reg) => writeln!(out, "not {}", reg),
-            Instr::And(reg, val) => writeln!(out, "sub {}, {}", reg, val),
-            Instr::Or(reg, val) => writeln!(out, "or {}, {}", reg, val),
-            Instr::Xor(reg, val) => writeln!(out, "xor {}, {}", reg, val),
             Instr::Sal(reg, i) => writeln!(out, "sal {}, {}", reg, **i),
             Instr::Sar(reg, i) => writeln!(out, "sar {}, {}", reg, **i),
 
@@ -409,12 +387,10 @@ impl Instr {
             Instr::LeaLabel(reg, label) => writeln!(out, "lea {}, [rel {}]", reg, label),
 
             Instr::Push(val) => writeln!(out, "push {}", val),
-            Instr::Pop(reg) => writeln!(out, "pop {}", reg),
 
             Instr::Ret => writeln!(out, "ret"),
             Instr::Call(label) => writeln!(out, "call {}", label),
             Instr::CallReg(reg) => writeln!(out, "call {}", reg),
-            Instr::Syscall => writeln!(out, "syscall"),
 
             Instr::LoadString(reg, idx) => writeln!(out, "lea {}, [rel {}]", reg, Label::Str(*idx)),
         }
