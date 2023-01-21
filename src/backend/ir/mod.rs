@@ -1,4 +1,5 @@
 mod gen;
+mod liveness;
 // mod opts;
 mod ra;
 
@@ -17,7 +18,7 @@ use crate::frontend::semantic_analysis::{
     FunType, INITIAL_FUNCS,
 };
 
-use self::ra::FlowAnalysis;
+use self::liveness::FlowAnalysis;
 
 use super::asmgen::QUADWORD_SIZE;
 
