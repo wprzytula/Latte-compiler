@@ -1,7 +1,7 @@
 use std::mem;
 
 use hashbrown::HashSet;
-use log::{debug, trace};
+use log::{debug, info, trace};
 use vector_map::set::VecSet;
 
 use crate::backend::ir::{BasicBlockIdx, Value};
@@ -194,6 +194,8 @@ impl FlowAnalysis {
             panic!("Global liveness analysis not yet performed");
         };
 
+        self.live_variables[quadruples.len() + 1] = live_out.clone();
+
         // Liveness
         // in[S] = (out [S] − kill [S]) ∪ use[S]
         // live before kth = (live after kth - lost during kth) ∪ read in kth
@@ -244,7 +246,11 @@ impl CFG {
                 visited.insert(current);
             }
 
-            trace!("dfs_liveness_iter(): entered {:?}", current);
+            trace!(
+                "dfs_liveness_iter(): entered {:?}:{:?}",
+                current,
+                &cfg[current].kind
+            );
 
             let change_in_successors = cfg[current]
                 .successors
@@ -283,18 +289,21 @@ impl CFG {
         let mut visited = HashSet::<BasicBlockIdx>::new();
         for entry_idx in self.blocks.iter().filter_map(|b| b.entry.then_some(b._idx)) {
             let mut i = 0;
+            debug!("{} iteration over function {}", i, &self[entry_idx]._func);
+            visited.clear();
             while dfs_liveness_iter(self, &mut visited, &mut live_in, &mut live_out, entry_idx) {
-                debug!("{} iteration over function {}", i, &self[entry_idx]._func);
+                visited.clear();
                 i += 1;
+                debug!("{} iteration over function {}", i, &self[entry_idx]._func);
             }
         }
 
         debug!(
-            "Live in: {:#?}",
+            "Live in: {:?}",
             live_in.iter().enumerate().collect::<Vec<_>>()
         );
         debug!(
-            "Live out: {:#?}",
+            "Live out: {:?}",
             live_out.iter().enumerate().collect::<Vec<_>>()
         );
 
@@ -309,6 +318,7 @@ impl CFG {
     }
 
     pub(super) fn liveness_analysis(&mut self) {
+        info!("Beginning Liveness Analysis");
         for block in self.blocks.iter_mut() {
             block
                 .flow_analysis

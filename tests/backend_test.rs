@@ -63,7 +63,7 @@ fn lattests_compile_virtual_methods() {
 
 fn lattests_compile(good_paths: &[&str]) {
     let test_path = Path::new("/home/xps15/Studia/Sem7/MRJP/Laby/Latte/lattests");
-
+    env_logger::builder().format_timestamp(None).init();
     let good = good_paths
         .iter()
         .map(|&path| {
