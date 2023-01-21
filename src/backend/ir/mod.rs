@@ -1,5 +1,6 @@
 mod gen;
 // mod opts;
+mod ra;
 
 pub(crate) use gen::{CONCAT_STRINGS_FUNC, NEW_FUNC};
 
@@ -15,6 +16,8 @@ use crate::frontend::semantic_analysis::{
     ast::{self, *},
     FunType, INITIAL_FUNCS,
 };
+
+use self::ra::FlowAnalysis;
 
 use super::asmgen::QUADWORD_SIZE;
 
@@ -294,6 +297,7 @@ pub struct BasicBlock {
     entry: bool,
     pub end_type: Option<EndType>,
     phi_nodes: VecMap<Var, VecMap<BasicBlockIdx, Var>>,
+    flow_analysis: FlowAnalysis,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

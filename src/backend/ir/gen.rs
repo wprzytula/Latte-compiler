@@ -198,6 +198,7 @@ impl BasicBlock {
             predecessors: vec![],
             end_type: None,
             phi_nodes: VecMap::new(),
+            flow_analysis: FlowAnalysis::default(),
         }
     }
 
