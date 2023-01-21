@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 pub mod asmgen;
 pub mod ir;
+mod ra;
 
 use std::fmt::{Debug, Display};
 use std::fs::{canonicalize, File};
