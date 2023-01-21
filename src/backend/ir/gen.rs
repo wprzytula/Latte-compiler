@@ -465,6 +465,7 @@ impl Program {
         // debug!("BEFORE SSA: max var = {}", state.fresh_reg(None).0);
         // cfg.make_ssa(&mut state);
         // cfg.optimise_ssa();
+        cfg.liveness_analysis();
         Ir {
             cfg,
             string_literals: state.string_literals,
