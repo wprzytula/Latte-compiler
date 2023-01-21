@@ -19,7 +19,7 @@ const ARGS_IN_REGISTERS: usize = 6;
 pub const QUADWORD_SIZE: usize = 8; // in bytes
 const RETADDR_SIZE: usize = QUADWORD_SIZE;
 
-fn params_registers() -> impl Iterator<Item = Reg> {
+pub(crate) fn params_registers() -> impl Iterator<Item = Reg> {
     [RDI, RSI, RDX, RCX, R8, R9].into_iter()
 }
 
@@ -144,27 +144,26 @@ impl Display for Mem {
     }
 }
 
-enum Reg {
+#[derive(PartialEq, Eq)]
+pub(crate) enum Reg {
     CallerSave(CallerSaveReg),
     CalleeSave(CalleeSaveReg),
 }
-const RAX: Reg = Reg::CallerSave(CallerSaveReg::Rax);
-const RCX: Reg = Reg::CallerSave(CallerSaveReg::Rcx);
-const RDX: Reg = Reg::CallerSave(CallerSaveReg::Rdx);
-const RDI: Reg = Reg::CallerSave(CallerSaveReg::Rdi);
-const RSI: Reg = Reg::CallerSave(CallerSaveReg::Rsi);
-const R8: Reg = Reg::CallerSave(CallerSaveReg::R8);
-const R9: Reg = Reg::CallerSave(CallerSaveReg::R9);
-const R10: Reg = Reg::CallerSave(CallerSaveReg::R10);
-const R11: Reg = Reg::CallerSave(CallerSaveReg::R11);
-
-const R12: Reg = Reg::CalleeSave(CalleeSaveReg::R12);
-const R13: Reg = Reg::CalleeSave(CalleeSaveReg::R13);
-const R14: Reg = Reg::CalleeSave(CalleeSaveReg::R14);
-const R15: Reg = Reg::CalleeSave(CalleeSaveReg::R15);
-const RSP: Reg = Reg::CalleeSave(CalleeSaveReg::Rsp);
-const RBP: Reg = Reg::CalleeSave(CalleeSaveReg::Rbp);
-
+pub(crate) const RAX: Reg = Reg::CallerSave(CallerSaveReg::Rax);
+pub(crate) const RCX: Reg = Reg::CallerSave(CallerSaveReg::Rcx);
+pub(crate) const RDX: Reg = Reg::CallerSave(CallerSaveReg::Rdx);
+pub(crate) const RDI: Reg = Reg::CallerSave(CallerSaveReg::Rdi);
+pub(crate) const RSI: Reg = Reg::CallerSave(CallerSaveReg::Rsi);
+pub(crate) const R8: Reg = Reg::CallerSave(CallerSaveReg::R8);
+pub(crate) const R9: Reg = Reg::CallerSave(CallerSaveReg::R9);
+pub(crate) const R10: Reg = Reg::CallerSave(CallerSaveReg::R10);
+pub(crate) const R11: Reg = Reg::CallerSave(CallerSaveReg::R11);
+pub(crate) const R12: Reg = Reg::CalleeSave(CalleeSaveReg::R12);
+pub(crate) const R13: Reg = Reg::CalleeSave(CalleeSaveReg::R13);
+pub(crate) const R14: Reg = Reg::CalleeSave(CalleeSaveReg::R14);
+pub(crate) const R15: Reg = Reg::CalleeSave(CalleeSaveReg::R15);
+pub(crate) const RSP: Reg = Reg::CalleeSave(CalleeSaveReg::Rsp);
+pub(crate) const RBP: Reg = Reg::CalleeSave(CalleeSaveReg::Rbp);
 impl Display for Reg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -174,7 +173,8 @@ impl Display for Reg {
     }
 }
 
-enum CallerSaveReg {
+#[derive(PartialEq, Eq)]
+pub(crate) enum CallerSaveReg {
     Rax,
     Rcx,
     Rdx,
@@ -201,7 +201,8 @@ impl Display for CallerSaveReg {
     }
 }
 
-enum CalleeSaveReg {
+#[derive(PartialEq, Eq)]
+pub(crate) enum CalleeSaveReg {
     Rbx,
     Rsp,
     Rbp,
