@@ -144,7 +144,7 @@ impl Display for Mem {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub(crate) enum Reg {
     CallerSave(CallerSaveReg),
     CalleeSave(CalleeSaveReg),
@@ -173,7 +173,7 @@ impl Display for Reg {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub(crate) enum CallerSaveReg {
     Rax,
     Rcx,
@@ -201,7 +201,7 @@ impl Display for CallerSaveReg {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub(crate) enum CalleeSaveReg {
     Rbx,
     Rsp,
