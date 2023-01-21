@@ -95,7 +95,6 @@ impl FlowAnalysis {
         // kill
         match quadruple {
             Quadruple::BinOp(var, _, _, _)
-            | Quadruple::RelOp(var, _, _, _)
             | Quadruple::UnOp(var, _, _)
             | Quadruple::Copy(var, _)
             | Quadruple::Set(var, _)
@@ -115,7 +114,7 @@ impl FlowAnalysis {
 
         // use
         match quadruple {
-            Quadruple::BinOp(_, var2, _, val) | Quadruple::RelOp(_, var2, _, val) => {
+            Quadruple::BinOp(_, var2, _, val) => {
                 live.insert(*var2);
                 block_kill.remove(var2);
                 if let Value::Variable(var) = val {

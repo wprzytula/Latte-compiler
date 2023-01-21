@@ -888,26 +888,6 @@ impl Quadruple {
                 Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?
             }
-            Quadruple::RelOp(dst, op1, rel_op, op2) => {
-                Instr::MovToReg(
-                    RAX,
-                    Val::Mem(frame.get_variable_mem(*op1, state.rsp_displacement)),
-                )
-                .emit(out)?;
-                let op2 = frame.get_val(*op2, state.rsp_displacement);
-                Instr::Xor(RCX, Val::Reg(RCX)).emit(out)?;
-                Instr::Cmp(RAX, op2).emit(out)?;
-                match rel_op {
-                    RelOpType::Gt => Instr::Setle.emit(out)?,
-                    RelOpType::Ge => Instr::Setl.emit(out)?,
-                    RelOpType::Lt => Instr::Setge.emit(out)?,
-                    RelOpType::Le => Instr::Setg.emit(out)?,
-                    RelOpType::Eq => Instr::Setne.emit(out)?,
-                    RelOpType::NEq => Instr::Sete.emit(out)?,
-                }
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RCX)
-                    .emit(out)?;
-            }
             Quadruple::UnOp(dst, un_op_type, op) => {
                 Instr::MovToReg(RAX, frame.get_val(*op, state.rsp_displacement)).emit(out)?;
                 match un_op_type {

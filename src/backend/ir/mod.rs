@@ -192,7 +192,6 @@ impl From<NonvoidType> for VarType {
 #[derive(Debug)]
 pub enum Quadruple {
     BinOp(Var, Var, BinOpType, Value), // dst, op1, op, op2
-    RelOp(Var, Var, RelOpType, Value), // dst, op1, op, op2
     UnOp(Var, UnOpType, Value),        // dst, op,
     InPlaceUnOp(InPlaceUnOpType, Loc),
 

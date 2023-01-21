@@ -223,7 +223,6 @@ impl BasicBlock {
             .iter()
             .filter_map(|quadruple| match quadruple {
                 Quadruple::BinOp(var, _, _, _)
-                | Quadruple::RelOp(var, _, _, _)
                 | Quadruple::UnOp(var, _, _)
                 | Quadruple::Copy(var, _)
                 | Quadruple::Set(var, _)
@@ -246,7 +245,7 @@ impl BasicBlock {
         let mut vars = HashSet::<Var>::new();
         for quadruple in self.quadruples.iter() {
             match quadruple {
-                Quadruple::BinOp(var1, var2, _, val) | Quadruple::RelOp(var1, var2, _, val) => {
+                Quadruple::BinOp(var1, var2, _, val) => {
                     vars.insert(*var1);
                     vars.insert(*var2);
                     if let Value::Variable(var) = val {
