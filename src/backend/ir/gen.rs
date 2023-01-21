@@ -202,10 +202,6 @@ impl BasicBlock {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.quadruples.is_empty()
-    }
-
     fn set_end_type(&mut self, new_end_type: EndType) {
         if let Some(ref old_end_type) = self.end_type {
             warn!(
