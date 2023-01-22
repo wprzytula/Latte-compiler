@@ -28,6 +28,7 @@ pub(crate) enum Reg {
     CalleeSave(CalleeSaveReg),
 }
 pub(crate) const RAX: Reg = Reg::CallerSave(CallerSaveReg::Rax);
+pub(crate) const RBX: Reg = Reg::CallerSave(CallerSaveReg::Rax);
 pub(crate) const RCX: Reg = Reg::CallerSave(CallerSaveReg::Rcx);
 pub(crate) const RDX: Reg = Reg::CallerSave(CallerSaveReg::Rdx);
 pub(crate) const RDI: Reg = Reg::CallerSave(CallerSaveReg::Rdi);
@@ -107,6 +108,15 @@ pub(crate) enum Val<I: InstrLevel> {
     Reg(Reg),
     Instant(Instant),
     Mem(I::Mem),
+}
+
+impl<I: InstrLevel> From<Loc<I>> for Val<I> {
+    fn from(loc: Loc<I>) -> Self {
+        match loc {
+            Loc::Reg(reg) => Val::Reg(reg),
+            Loc::Mem(mem) => Val::Mem(mem),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -235,6 +245,13 @@ struct VarLoc {
     mem: VecSet<FrameOffset>,
 }
 impl VarLoc {
+    fn empty() -> Self {
+        Self {
+            regs: VecSet::new(),
+            mem: VecSet::new(),
+        }
+    }
+
     fn is_in_reg(&self) -> bool {
         !self.regs.is_empty()
     }
@@ -246,22 +263,20 @@ impl VarLoc {
     }
 }
 
+enum CallerSaveRegState {
+    Free,
+    Taken(Var),
+}
+
+enum CalleeSaveRegState {
+    CallerTaken,
+    Free,
+    Taken(Var),
+}
+
 struct Description {
-    rax: Option<Var>,
-    rbx: Option<Var>,
-    rcx: Option<Var>,
-    rdx: Option<Var>,
-    rdi: Option<Var>,
-    rsi: Option<Var>,
-    rbp: Option<Var>,
-    r8: Option<Var>,
-    r9: Option<Var>,
-    r10: Option<Var>,
-    r11: Option<Var>,
-    r12: Option<Var>,
-    r13: Option<Var>,
-    r14: Option<Var>,
-    r15: Option<Var>,
+    caller_save_regs: VecMap<Reg, CallerSaveRegState>,
+    callee_save_regs: VecMap<Reg, CalleeSaveRegState>,
 
     next_frame_offset: isize,
 
@@ -270,27 +285,70 @@ struct Description {
 }
 
 impl Description {
-    fn new_func() -> Self {
+    fn new_func(vars: &VecSet<Var>) -> Self {
         Self {
-            rax: None,
-            rbx: None,
-            rcx: None,
-            rdx: None,
-            rdi: None,
-            rsi: None,
-            rbp: None,
-            r8: None,
-            r9: None,
-            r10: None,
-            r11: None,
-            r12: None,
-            r13: None,
-            r14: None,
-            r15: None,
+            caller_save_regs: [RAX, RCX, RDX, R8, R9, R10, R11]
+                .into_iter()
+                .map(|reg| (reg, CallerSaveRegState::Free))
+                .collect(),
+            callee_save_regs: [RBX, RBP, R12, R13, R14, R15]
+                .into_iter()
+                .map(|reg| (reg, CalleeSaveRegState::CallerTaken))
+                .collect(),
+
             next_frame_offset: 0,
-            var_locs: VecMap::new(),
+            var_locs: vars
+                .iter()
+                .copied()
+                .map(|var| (var, VarLoc::empty()))
+                .collect(),
             persistent_vars: VecMap::new(),
         }
+    }
+
+    fn allocate_free_caller_save_reg(&mut self, var: Var, live_atm: &VecSet<Var>) -> Option<Reg> {
+        self.caller_save_regs
+            .iter_mut()
+            .find_map(|(reg, state)| match state {
+                CallerSaveRegState::Free => {
+                    *state = CallerSaveRegState::Taken(var);
+                    Some(*reg)
+                }
+                CallerSaveRegState::Taken(prev_var) if live_atm.contains(prev_var) => None,
+                CallerSaveRegState::Taken(prev_var) => {
+                    self.var_locs.get_mut(prev_var).unwrap().regs.remove(reg);
+                    *prev_var = var;
+                    Some(*reg)
+                }
+            })
+    }
+
+    fn local_variables_count(&self) -> usize {
+        self.persistent_vars.len()
+    }
+
+    fn get_any_var_loc_preferring_regs(
+        &self,
+        var: Var,
+        preferred_reg: Option<Reg>,
+    ) -> Loc<RaLevel> {
+        let locs = self.var_locs.get(&var).unwrap();
+
+        if let Some(preferred_reg) =
+            preferred_reg.and_then(|preferred| locs.regs.contains(&preferred).then_some(preferred))
+        {
+            Loc::Reg(preferred_reg)
+        } else if let Some(reg) = locs.any_reg() {
+            Loc::Reg(reg)
+        } else {
+            Loc::Mem(RaMem::Stack {
+                frame_offset: locs.any_mem().unwrap(),
+            })
+        }
+    }
+
+    fn put_in_memory(&mut self, var: Var, loc: FrameOffset) {
+        self.var_locs.get_mut(&var).unwrap().mem.insert(loc);
     }
 
     fn get_variable_mem(&mut self, var: Var) -> RaMem {
@@ -306,26 +364,6 @@ impl Description {
         }
     }
 
-    fn reg_mut(&mut self, reg: Reg) -> &mut Option<Var> {
-        match reg {
-            RAX => &mut self.rax,
-            RCX => &mut self.rcx,
-            RDX => &mut self.rdx,
-            RDI => &mut self.rdi,
-            RSI => &mut self.rsi,
-            R8 => &mut self.r8,
-            R9 => &mut self.r9,
-            R10 => &mut self.r10,
-            R11 => &mut self.r11,
-            R12 => &mut self.r12,
-            R13 => &mut self.r13,
-            R14 => &mut self.r14,
-            R15 => &mut self.r15,
-            RBP => &mut self.rbp,
-            _ => unreachable!(),
-        }
-    }
-
     fn get_or_register_persistent_var(&mut self, var: Var) -> FrameOffset {
         if let Some(offset) = self.persistent_vars.get(&var) {
             *offset
@@ -335,6 +373,10 @@ impl Description {
             self.persistent_vars.insert(var, offset);
             offset
         }
+    }
+
+    fn get_persistent_var(&mut self, var: Var) -> Option<FrameOffset> {
+        self.persistent_vars.get(&var).copied()
     }
 
     fn enter_block(&mut self, cfg: &CFG, block: BasicBlockIdx) {
