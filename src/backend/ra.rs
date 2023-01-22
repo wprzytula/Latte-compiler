@@ -755,12 +755,12 @@ impl CFG {
                             if matches!(convention, CallingConvention::SimpleCdecl) {
                                 let mut instructions = Vec::new();
                                 let mut vars = self.variables_in_function(func);
+                                vars.extend(&self.functions.get(func).unwrap().params);
                                 let mut description = Description::new_func(&vars);
 
-                                vars.extend(&self.functions.get(func).unwrap().params);
-                                for var in vars.iter().copied() {
-                                    description.get_or_register_persistent_var(var);
-                                }
+                                // for var in vars.iter().copied() {
+                                //     description.get_or_register_persistent_var(var);
+                                // }
 
                                 info!("Emitting ra function: {}", func);
 
@@ -790,6 +790,8 @@ impl CFG {
                                         description.get_variable_mem(var),
                                         RAX,
                                     ));
+                                    let param_loc = description.get_or_register_persistent_var(var);
+                                    description.put_in_memory(var, param_loc);
                                 }
 
                                 self.function_block_instructions(
@@ -848,6 +850,7 @@ impl CFG {
         debug!("Emitting ir block: {:?} as {}", func_block, block_label);
         instructions.push(RaInstr::Label(block_label));
 
+        description.enter_block(self, func_block);
         self[func_block].instructions(self, description, instructions, state);
 
         match &self[func_block].end_type {
@@ -860,12 +863,16 @@ impl CFG {
                         instructions.push(RaInstr::MovToReg(RAX, Val::Instant(*i)))
                     }
                     ir::Value::Variable(var) => {
-                        let loc = description.get_any_var_loc_preferring_regs(*var, Some(RAX));
+                        instructions.push(RaInstr::MovToReg(
+                            RAX,
+                            Val::Mem(description.get_variable_mem(*var)),
+                        ));
+                        /* let loc = description.get_any_var_loc_preferring_regs(*var, Some(RAX));
                         if matches!(loc, Loc::Reg(RAX)) {
                             // nothing to do
                         } else {
                             instructions.push(RaInstr::MovToReg(RAX, loc.into()))
-                        }
+                        } */
                     }
                 }
                 instructions.push(RaInstr::Ret);
