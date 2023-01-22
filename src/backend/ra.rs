@@ -10,7 +10,6 @@ use crate::backend::ir::{self, CallingConvention, EndType, IrFunction};
 use crate::frontend::semantic_analysis::ast::Ident;
 
 use super::asmgen::{params_registers, Frame, QUADWORD_SIZE};
-use super::ir::liveness::FlowAnalysis;
 use super::ir::{
     BasicBlock, BasicBlockIdx, BinOpType, InPlaceUnOpType, Instant, Quadruple, RelOpType,
     StringLiteral, UnOpType, Value, Var, CFG,
@@ -322,6 +321,16 @@ impl Description {
         }
     }
 
+    fn allocate_caller_save_reg(
+        &mut self,
+        var: Var,
+        live_atm: &VecSet<Var>,
+        instructions: &mut Vec<RaInstr>,
+    ) -> Reg {
+        self.allocate_free_caller_save_reg(var, live_atm)
+            .unwrap_or_else(|| self.reallocate_taken_caller_save_reg(var, live_atm, instructions))
+    }
+
     fn allocate_free_caller_save_reg(&mut self, var: Var, live_atm: &VecSet<Var>) -> Option<Reg> {
         self.caller_save_regs
             .iter_mut()
@@ -450,6 +459,17 @@ impl Description {
         self.var_locs.get_mut(&var).unwrap().mem.insert(loc);
     }
 
+    fn put_to_reg(&mut self, var: Var, reg: Reg) {
+        self.var_locs.get_mut(&var).unwrap().regs.insert(reg);
+    }
+
+    fn variable_mutated(&mut self, var: Var, now_in_reg: Reg) {
+        // it means that we have to remove variable from all its locs.
+        let locs = self.var_locs.get_mut(&var).unwrap();
+        locs.regs.retain(|reg| *reg == now_in_reg);
+        locs.mem.clear();
+    }
+
     fn get_variable_mem(&mut self, var: Var) -> RaMem {
         RaMem::Stack {
             frame_offset: self.get_or_register_persistent_var(var),
@@ -493,342 +513,6 @@ impl Description {
         for var in live_in_out.copied() {
             self.get_or_register_persistent_var(var);
         }
-    }
-
-    fn next_quadruple(
-        &mut self,
-        flow_analysis: &FlowAnalysis,
-        quadruple_idx: usize,
-        quadruple: &Quadruple,
-    ) {
-        match quadruple {
-            Quadruple::BinOp(dst, op1, bin_op, op2) => {
-                let op1_survives = flow_analysis.live_variables[quadruple_idx + 1].contains(op1);
-                if !op1_survives {
-                    // ADD Loc, op2
-                }
-
-                // Instr::MovToReg(
-                //     RAX,
-                //     Val::Mem(description.get_variable_mem(*op1)),
-                // )
-                // );;
-                // match bin_op {
-                //     BinOpType::Add => {
-                //         Instr::Add(RAX, description.get_val(*op2)));
-                //     }
-                //     BinOpType::Sub => {
-                //         Instr::Sub(RAX, description.get_val(*op2)));
-                //     }
-                //     BinOpType::Mul => {
-                //         Instr::IMul(RAX, description.get_val(*op2)));
-                //     }
-                //     BinOpType::Div => {
-                //         Instr::Cqo);;
-                //         let val = description.get_val(*op2);
-                //         match val {
-                //             Val::Reg(reg) => Instr::IDivReg(reg));,
-                //             Val::Instant(_) => {
-                //                 Instr::MovToReg(RCX, val));;
-                //                 Instr::IDivReg(RCX));;
-                //             }
-                //             Val::Mem(mem) => Instr::IDivMem(mem));,
-                //         }
-                //     }
-                //     BinOpType::Mod => {
-                //         Instr::Cqo);;
-                //         let val = description.get_val(*op2);
-                //         match val {
-                //             Val::Reg(reg) => Instr::IDivReg(reg));,
-                //             Val::Instant(_) => {
-                //                 Instr::MovToReg(RCX, val));;
-                //                 Instr::IDivReg(RCX));;
-                //             }
-                //             Val::Mem(mem) => Instr::IDivMem(mem));,
-                //         }
-                //         // mov remainder from RDX to RAX:
-                //         Instr::MovToReg(RAX, Val::Reg(RDX)));;
-                //     }
-                // };
-                // Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-                //     );
-            }
-            _ => (),
-            //     Quadruple::UnOp(dst, un_op_type, op) => {
-            //         Instr::MovToReg(RAX, description.get_val(*op)));;
-            //         match un_op_type {
-            //             UnOpType::Not => Instr::Not(RAX));,
-            //             UnOpType::Neg => Instr::Neg(Loc::Reg(RAX)));,
-            //         }
-            //         Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-            //             );;
-            //     }
-            //     Quadruple::Copy(dst, src) => {
-            //         Instr::MovToReg(
-            //             RAX,
-            //             Val::Mem(description.get_variable_mem(*src)),
-            //         )
-            //         );;
-            //         Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-            //             );;
-            //     }
-            //     Quadruple::Set(dst, i) => {
-            //         Instr::MovToReg(RAX, Val::Instant(*i)));;
-            //         Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-            //             );;
-            //     }
-            //     Quadruple::GetStrLit(dst, str_idx) => {
-            //         Instr::LoadString(RAX, *str_idx));;
-            //         Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-            //             );;
-            //     }
-
-            //     Quadruple::Call(dst, func, args) => {
-            //         let cfg_function = cfg.functions.get(func).unwrap();
-            //         let callee_convention = &cfg_function.convention;
-            //         match callee_convention {
-            //             CallingConvention::SimpleCdecl => {
-            //                 // Params in registers
-            //                 for (reg, arg) in params_registers().zip(args.iter().copied()) {
-            //                     Instr::MovToReg(reg, description.get_val(arg))
-            //                         );;
-            //                 }
-
-            //                 let params_on_the_stack_num = usize::max(
-            //                     (args.len() as isize - params_registers().count() as isize) as usize,
-            //                     0,
-            //                 );
-
-            //                 let stack_alignment_growth = if params_on_the_stack_num % 2 != 0 {
-            //                     QUADWORD_SIZE
-            //                 } else {
-            //                     0
-            //                 }; // stack alignment
-
-            //                 if stack_alignment_growth != 0 {
-            //                     state
-            //                         .advance_rsp(stack_alignment_growth as isize)
-            //                         );;
-            //                 }
-
-            //                 // Params on the stack
-            //                 for arg in args.iter().copied().skip(params_registers().count()).rev() {
-            //                     Instr::Push(description.get_val(arg)));;
-            //                     state.rsp_displacement += QUADWORD_SIZE as isize;
-
-            //                     /* Instr::MovToReg(RAX, description.get_val(arg))
-            //                         );;
-
-            //                     Instr::MovToMem(
-            //                         Mem {
-            //                             word_len: WordLen::Qword,
-            //                             base: RSP,
-            //                             index: None,
-            //                             displacement: Some(
-            //                                 -((QUADWORD_SIZE + no * QUADWORD_SIZE) as isize),
-            //                             ),
-            //                         },
-            //                         RAX,
-            //                     )
-            //                     );; */
-            //                 }
-
-            //                 // // place arguments in corresponding callee's variables
-            //                 // for (arg, param) in args.iter().copied().zip(callee_params.iter().copied())
-            //                 // {
-            //                 //     Instr::MovToReg(RAX, description.get_val(arg))
-            //                 //         );;
-            //                 //     Instr::MovToMem(
-            //                 //         callee_description.get_variable_mem(param, -(RETADDR_SIZE as isize)),
-            //                 //         RAX,
-            //                 //     )
-            //                 //     );;
-            //                 // }
-
-            //                 Instr::Call(Label::Named(func.clone())));;
-
-            //                 if stack_alignment_growth != 0 || params_on_the_stack_num > 0 {
-            //                     state.reset_rsp());;
-            //                 }
-
-            //                 // Save return value
-            //                 Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-            //                     );;
-            //             }
-            //             CallingConvention::CdeclFFI => {
-            //                 // place arguments in corresponding registers
-            //                 for (arg, reg) in args.iter().copied().zip(params_registers()) {
-            //                     Instr::MovToReg(reg, description.get_val(arg))
-            //                         );;
-            //                 }
-
-            //                 // stack alignment, as no params on the stack
-            //                 // Instr::Sub(RSP, Val::Instant(Instant(8))));;
-
-            //                 // // sanity alignment check
-            //                 // // before call, the stack must be aligned to 0 mod 16
-            //                 // Instr::MovToReg(RAX, Val::Reg(RSP)));;
-            //                 // Instr::Cqo);;
-            //                 // Instr::MovToReg(RCX, Val::Instant(Instant(16))));;
-            //                 // Instr::IDivReg(RCX));;
-            //                 // // mov remainder from RDX to RAX:
-            //                 // Instr::Test(RDX));;
-            //                 // Instr::Jnz(Label::Func(Ident::from("_notaligned"))));;
-
-            //                 Instr::Call(Label::Named(func.clone())));;
-
-            //                 // Instr::Add(RSP, Val::Instant(Instant(8))));;
-
-            //                 // Save return value
-            //                 Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-            //                     );;
-            //             }
-            //         }
-            //     }
-
-            //     Quadruple::ArrLoad(_, _, _) => todo!(),
-            //     Quadruple::ArrStore(_, _, _) => todo!(),
-
-            //     Quadruple::DerefLoad(dst, ptr) => {
-            //         Instr::MovToReg(
-            //             RAX,
-            //             Val::Mem(description.get_variable_mem(ptr.base)),
-            //         )
-            //         );;
-            //         Instr::MovToReg(
-            //             RAX,
-            //             Val::Mem(Mem {
-            //                 word_len: WordLen::Qword,
-            //                 base: RAX,
-            //                 index: None,
-            //                 displacement: Some(ptr.offset as isize),
-            //             }),
-            //         )
-            //         );;
-            //         Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-            //             );;
-            //     }
-
-            //     Quadruple::DerefStore(src, ptr) => {
-            //         // src in RAX, ptr in RDX
-            //         Instr::MovToReg(RAX, description.get_val(*src)));;
-            //         Instr::MovToReg(
-            //             RDX,
-            //             Val::Mem(description.get_variable_mem(ptr.base)),
-            //         )
-            //         );;
-            //         let ptr_mem = Mem {
-            //             word_len: WordLen::Qword,
-            //             base: RDX,
-            //             index: None,
-            //             displacement: Some(ptr.offset as isize),
-            //         };
-            //         Instr::MovToMem(ptr_mem, RAX));;
-            //     }
-
-            //     Quadruple::InPlaceUnOp(op, ir_loc) => {
-            //         let loc = Loc::new_from_ir_loc(out, frame, state, ir_loc)?;
-            //         match op {
-            //             InPlaceUnOpType::Inc => Instr::Inc(loc));,
-            //             InPlaceUnOpType::Dec => Instr::Dec(loc));,
-            //         }
-            //         if let Loc::Var(var) = ir_loc {
-            //             Instr::MovToMem(description.get_variable_mem(*var), RAX)
-            //                 );;
-            //         }
-            //     }
-
-            //     Quadruple::VstStore(class_idx, mem) => {
-            //         Instr::LeaLabel(R8, cfg.classes[class_idx.0].vst_name()));;
-            //         Instr::MovToReg(
-            //             R9,
-            //             Val::Mem(description.get_variable_mem(mem.base)),
-            //         )
-            //         );;
-            //         Instr::MovToMem(
-            //             Mem {
-            //                 word_len: WordLen::Qword,
-            //                 base: R9,
-            //                 index: None,
-            //                 displacement: None,
-            //             },
-            //             R8,
-            //         )
-            //         );;
-            //     }
-
-            //     Quadruple::VirtualCall(dst, object, method_idx, args) => {
-            //         // Params in registers
-            //         for (reg, arg) in params_registers().zip(args.iter().copied()) {
-            //             Instr::MovToReg(reg, description.get_val(arg)));;
-            //         }
-
-            //         let params_on_the_stack_num = usize::max(
-            //             (args.len() as isize - params_registers().count() as isize) as usize,
-            //             0,
-            //         );
-
-            //         let stack_alignment_growth = if params_on_the_stack_num % 2 != 0 {
-            //             QUADWORD_SIZE
-            //         } else {
-            //             0
-            //         }; // stack alignment
-
-            //         if stack_alignment_growth != 0 {
-            //             state
-            //                 .advance_rsp(stack_alignment_growth as isize)
-            //                 );;
-            //         }
-
-            //         // Params on the stack
-            //         for arg in args.iter().copied().skip(params_registers().count()).rev() {
-            //             Instr::Push(description.get_val(arg)));;
-            //             state.rsp_displacement += QUADWORD_SIZE as isize;
-            //     }
-
-            //         // Get the object
-            //         Instr::MovToReg(
-            //             RAX,
-            //             Val::Mem(description.get_variable_mem(*object)),
-            //         )
-            //         );;
-
-            //         // Get VST ptr from the object
-            //         Instr::MovToReg(
-            //             RAX,
-            //             Val::Mem(Mem {
-            //                 word_len: WordLen::Qword,
-            //                 base: RAX,
-            //                 index: None,
-            //                 displacement: None,
-            //             }),
-            //         )
-            //         );;
-
-            //         // Virtual call: get method address from VST
-            //         Instr::MovToReg(
-            //             RAX,
-            //             Val::Mem(Mem {
-            //                 word_len: WordLen::Qword,
-            //                 base: RAX,
-            //                 index: None,
-            //                 displacement: Some((*method_idx * QUADWORD_SIZE) as isize),
-            //             }),
-            //         )
-            //         );;
-
-            //         Instr::CallReg(RAX));;
-
-            //         if stack_alignment_growth != 0 || params_on_the_stack_num > 0 {
-            //             state.reset_rsp());;
-            //         }
-
-            //         // Save return value
-            //         Instr::MovToMem(description.get_variable_mem(*dst), RAX)
-            //             );;
-        }
-        // };
-        // Ok(())
     }
 }
 
@@ -958,7 +642,26 @@ impl CFG {
         instructions.push(RaInstr::Label(block_label));
 
         description.enter_block(self, func_block);
-        self[func_block].instructions(self, description, instructions, state);
+        self[func_block].instructions(self, func_block, description, instructions, state);
+
+        // Upon end of the block, make sure to put all live vars to their correspoding places in mem.
+        let live_out = self[func_block]
+            .flow_analysis
+            .live_variables
+            .last()
+            .unwrap();
+        for var in live_out {
+            let loc = description.get_persistent_var(*var).unwrap();
+            let locs = description.var_locs.get_mut(var).unwrap();
+            if !locs.mem.contains(&loc) {
+                locs.mem.insert(loc);
+                if let Some(reg) = locs.any_reg() {
+                    instructions.push(Instr::MovToMem(description.get_variable_mem(*var), reg));
+                } else {
+                    unimplemented!("Unlikely situation, too little time...")
+                }
+            }
+        }
 
         match &self[func_block].end_type {
             Some(EndType::Return(None)) | None => {
@@ -1085,12 +788,20 @@ impl BasicBlock {
     fn instructions(
         &self,
         cfg: &CFG,
+        block_idx: BasicBlockIdx,
         description: &mut Description,
         instructions: &mut Vec<RaInstr>,
         state: &mut RaGenState,
     ) {
         for (quadruple_idx, quadruple) in self.quadruples.iter().enumerate() {
-            quadruple.instructions(cfg, description, instructions, state, quadruple_idx);
+            quadruple.instructions(
+                cfg,
+                block_idx,
+                description,
+                instructions,
+                state,
+                quadruple_idx,
+            );
         }
     }
 }
@@ -1099,11 +810,14 @@ impl Quadruple {
     fn instructions(
         &self,
         cfg: &CFG,
+        block_idx: BasicBlockIdx,
         description: &mut Description,
         instructions: &mut Vec<RaInstr>,
         state: &mut RaGenState,
         quadruple_idx: usize,
     ) {
+        let live_before = &cfg[block_idx].flow_analysis.live_variables[quadruple_idx];
+        let live_after = &cfg[block_idx].flow_analysis.live_variables[quadruple_idx + 1];
         match self {
             Quadruple::BinOp(dst, op1, bin_op, op2) => {
                 instructions.push(RaInstr::MovToReg(
@@ -1157,11 +871,24 @@ impl Quadruple {
                 instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
             }
             Quadruple::Copy(dst, src) => {
+                let reg = description
+                    .var_locs
+                    .get(dst)
+                    .unwrap()
+                    .any_reg()
+                    .unwrap_or_else(|| {
+                        description.allocate_caller_save_reg(*dst, live_before, instructions)
+                    });
+
+                description.variable_mutated(*dst, reg);
                 instructions.push(RaInstr::MovToReg(
-                    RAX,
-                    Val::Mem(description.get_variable_mem(*src)),
+                    reg,
+                    description
+                        .get_any_var_loc_preferring_regs(*src, None)
+                        .into(),
                 ));
-                instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
+                description.put_to_reg(*src, reg);
+                // instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
             }
             Quadruple::Set(dst, i) => {
                 instructions.push(RaInstr::MovToReg(RAX, Val::Instant(*i)));
