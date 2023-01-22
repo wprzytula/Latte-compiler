@@ -1,5 +1,5 @@
 use hashbrown::{HashMap, HashSet};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use std::fmt;
 use std::ops::Deref;
 use vector_map::set::VecSet;
@@ -81,28 +81,6 @@ pub enum Label {
 pub(crate) enum Loc<I: InstrLevel> {
     Reg(Reg),
     Mem(I::Mem),
-}
-
-impl Loc<RaLevel> {
-    fn new_from_ir_loc(
-        description: &mut Description,
-        instructions: &mut Vec<RaInstr>,
-        loc: &ir::Loc,
-    ) -> Self {
-        let var = loc.var();
-        instructions.push(RaInstr::MovToReg(
-            RAX,
-            Val::Mem(description.get_variable_mem(var)),
-        ));
-
-        match loc {
-            ir::Loc::Var(_) => Loc::Reg(RAX),
-            ir::Loc::Mem(ir::Mem { offset, .. }) => Loc::Mem(RaMem::Heap {
-                base: RAX,
-                displacement: *offset as isize,
-            }),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -263,6 +241,9 @@ impl VarLoc {
     fn any_mem(&self) -> Option<FrameOffset> {
         self.mem.iter().next().copied()
     }
+    fn has_any_loc(&self) -> bool {
+        self.any_reg().is_some() || self.any_mem().is_some()
+    }
 }
 
 enum CallerSaveRegState {
@@ -321,86 +302,167 @@ impl Description {
         }
     }
 
+    fn get_reg_or_allocate(
+        &mut self,
+        var: Var,
+        live_atm: &VecSet<Var>,
+        instructions: &mut Vec<RaInstr>,
+    ) -> Reg {
+        self.any_reg(var)
+            .unwrap_or_else(|| self.allocate_caller_save_reg(var, live_atm, instructions))
+    }
+
     fn allocate_caller_save_reg(
         &mut self,
         var: Var,
         live_atm: &VecSet<Var>,
         instructions: &mut Vec<RaInstr>,
     ) -> Reg {
-        self.allocate_free_caller_save_reg(var, live_atm)
-            .unwrap_or_else(|| self.reallocate_taken_caller_save_reg(var, live_atm, instructions))
-    }
-
-    fn allocate_free_caller_save_reg(&mut self, var: Var, live_atm: &VecSet<Var>) -> Option<Reg> {
-        self.caller_save_regs
-            .iter_mut()
-            .find_map(|(reg, state)| match state {
-                CallerSaveRegState::Free => {
-                    trace!("Allocated free {} for var {:?}", *reg, var);
-                    *state = CallerSaveRegState::Taken(var);
-                    Some(*reg)
-                }
-                CallerSaveRegState::Taken(prev_var) if live_atm.contains(prev_var) => None,
-                CallerSaveRegState::Taken(prev_var) => {
-                    trace!(
-                        "Allocated {} (taken by dead var {:?}) for var {:?}",
-                        *reg,
-                        prev_var,
-                        var
-                    );
-                    self.var_locs.get_mut(prev_var).unwrap().regs.remove(reg);
-                    *prev_var = var;
-                    Some(*reg)
-                }
+        self.allocate_free_caller_save_any_reg(var, live_atm)
+            .unwrap_or_else(|| {
+                self.reallocate_taken_caller_save_robin_reg(var, live_atm, instructions)
             })
     }
 
-    fn reallocate_taken_caller_save_reg(
+    fn allocate_caller_save_provided_reg(
         &mut self,
-        var: Var,
+        var: Option<Var>,
+        reg: Reg,
         live_atm: &VecSet<Var>,
         instructions: &mut Vec<RaInstr>,
     ) -> Reg {
-        self.reallocation_robin = (self.reallocation_robin + 1) % CALLER_SAVE_REGS.len();
-        let (&reg, state) = self
-            .caller_save_regs
-            .iter_mut()
-            .skip(self.reallocation_robin)
-            .next()
-            .unwrap();
+        self.allocate_free_caller_save_provided_reg(var, reg, live_atm)
+            .unwrap_or_else(|| {
+                self.reallocate_taken_caller_save_provided_reg(var, reg, live_atm, instructions)
+            })
+    }
+
+    fn allocate_free_caller_save_provided_reg(
+        &mut self,
+        var: Option<Var>,
+        reg: Reg,
+        live_atm: &VecSet<Var>,
+    ) -> Option<Reg> {
+        let reg = match self.caller_save_regs.get_mut(&reg).unwrap() {
+            state @ CallerSaveRegState::Free => {
+                if let Some(var) = var {
+                    trace!("Allocated free {} for var {:?}", reg, var);
+                    *state = CallerSaveRegState::Taken(var);
+                } else {
+                    trace!("Deallocated for free {}", reg);
+                }
+                Some(reg)
+            }
+            CallerSaveRegState::Taken(prev_var) if live_atm.contains(prev_var) => None,
+            CallerSaveRegState::Taken(prev_var) => {
+                if let Some(var) = var {
+                    trace!(
+                        "Allocated {} (taken by dead var {:?}) for var {:?}",
+                        reg,
+                        prev_var,
+                        var
+                    );
+                    self.var_locs.get_mut(prev_var).unwrap().regs.remove(&reg);
+                    *prev_var = var;
+                } else {
+                    trace!("Deallocated {} (was taken by dead var {:?})", reg, prev_var,);
+                }
+                Some(reg)
+            }
+        };
+        if let Some(reg) = reg {
+            if var.is_none() {
+                *self.caller_save_regs.get_mut(&reg).unwrap() = CallerSaveRegState::Free;
+            }
+        }
+        reg
+    }
+
+    fn allocate_free_caller_save_any_reg(
+        &mut self,
+        var: Var,
+        live_atm: &VecSet<Var>,
+    ) -> Option<Reg> {
+        CALLER_SAVE_REGS
+            .iter()
+            .find(|&reg| {
+                self.allocate_free_caller_save_provided_reg(Some(var), *reg, live_atm)
+                    .is_some()
+            })
+            .copied()
+    }
+
+    fn reallocate_taken_caller_save_provided_reg(
+        &mut self,
+        var: Option<Var>,
+        reg: Reg,
+        live_atm: &VecSet<Var>,
+        instructions: &mut Vec<RaInstr>,
+    ) -> Reg {
+        let state = self.caller_save_regs.get_mut(&reg).unwrap();
         match state {
             CallerSaveRegState::Free => {
                 error!("Free reg during reallocation - this shouldn't happen.");
-                *state = CallerSaveRegState::Taken(var);
+                if let Some(var) = var {
+                    *state = CallerSaveRegState::Taken(var);
+                }
             }
             CallerSaveRegState::Taken(prev_var) => {
                 let prev_var = {
                     let prev = *prev_var;
-                    *prev_var = var;
+                    if let Some(var) = var {
+                        *prev_var = var;
+                    }
                     prev
                 };
-                if self
-                    .var_locs
-                    .get_mut(&prev_var)
-                    .unwrap()
-                    .any_mem()
-                    .is_none()
-                {
-                    let loc = self
-                        .get_persistent_var(prev_var)
-                        .unwrap_or_else(|| self.alloc_from_temporary_mem_pool(prev_var, live_atm));
-                    self.var_locs.get_mut(&prev_var).unwrap().mem.insert(loc);
-                    instructions.push(Instr::MovToMem(RaMem::Stack { frame_offset: loc }, reg));
+                if let Some(var) = var {
                     trace!(
                         "Reallocated {} (previously taken by {:?}) for var {:?}",
                         reg,
                         prev_var,
                         var
                     );
+                } else {
+                    trace!(
+                        "Deallocated {} (previously was taken by {:?})",
+                        reg,
+                        prev_var,
+                    );
+                }
+                self.var_locs.get_mut(&prev_var).unwrap().regs.remove(&reg);
+
+                if !self.var_locs.get_mut(&prev_var).unwrap().has_any_loc() {
+                    let loc = self
+                        .get_persistent_var(prev_var)
+                        .unwrap_or_else(|| self.alloc_from_temporary_mem_pool(prev_var, live_atm));
+                    let prev_locs = self.var_locs.get_mut(&prev_var).unwrap();
+                    prev_locs.mem.insert(loc);
+                    prev_locs.regs.remove(&reg);
+                    instructions.push(Instr::MovToMem(RaMem::Stack { frame_offset: loc }, reg));
                 }
             }
         };
+        if var.is_none() {
+            *self.caller_save_regs.get_mut(&reg).unwrap() = CallerSaveRegState::Free;
+        }
         reg
+    }
+
+    fn reallocate_taken_caller_save_robin_reg(
+        &mut self,
+        var: Var,
+        live_atm: &VecSet<Var>,
+        instructions: &mut Vec<RaInstr>,
+    ) -> Reg {
+        self.reallocation_robin = (self.reallocation_robin + 1) % CALLER_SAVE_REGS.len();
+        let reg = self
+            .caller_save_regs
+            .keys()
+            .skip(self.reallocation_robin)
+            .next()
+            .copied()
+            .unwrap();
+        self.reallocate_taken_caller_save_provided_reg(Some(var), reg, live_atm, instructions)
     }
 
     fn alloc_from_temporary_mem_pool(&mut self, var: Var, live_atm: &VecSet<Var>) -> FrameOffset {
@@ -431,6 +493,13 @@ impl Description {
         new_spilled_loc
     }
 
+    fn save_caller_save_regs(&mut self, live_atm: &VecSet<Var>, instructions: &mut Vec<RaInstr>) {
+        trace!("Saving caller save regs before call.");
+        for reg in CALLER_SAVE_REGS.iter().copied() {
+            self.allocate_caller_save_provided_reg(None, reg, live_atm, instructions);
+        }
+    }
+
     fn local_variables_count(&self) -> usize {
         self.persistent_vars.len() + self.temporary_pool.len()
     }
@@ -455,6 +524,10 @@ impl Description {
         }
     }
 
+    fn any_reg(&self, var: Var) -> Option<Reg> {
+        self.var_locs.get(&var).unwrap().any_reg()
+    }
+
     fn put_in_memory(&mut self, var: Var, loc: FrameOffset) {
         self.var_locs.get_mut(&var).unwrap().mem.insert(loc);
     }
@@ -466,13 +539,25 @@ impl Description {
     fn variable_mutated(&mut self, var: Var, now_in_reg: Reg) {
         // it means that we have to remove variable from all its locs.
         let locs = self.var_locs.get_mut(&var).unwrap();
-        locs.regs.retain(|reg| *reg == now_in_reg);
         locs.mem.clear();
+        locs.regs.clear();
+        locs.regs.insert(now_in_reg);
     }
 
     fn get_variable_mem(&mut self, var: Var) -> RaMem {
         RaMem::Stack {
-            frame_offset: self.get_or_register_persistent_var(var),
+            frame_offset: self
+                .var_locs
+                .get(&var)
+                .unwrap()
+                .mem
+                .iter()
+                .next()
+                .copied()
+                .unwrap_or_else(|| {
+                    warn!("No mem loc found for var {:?}", var);
+                    self.get_or_register_persistent_var(var)
+                }),
         }
     }
 
@@ -493,6 +578,7 @@ impl Description {
         if let Some(offset) = self.persistent_vars.get(&var) {
             *offset
         } else {
+            debug!("Registering persistent var {:?}", var);
             let offset = self.next_offset();
             self.persistent_vars.insert(var, offset);
             offset
@@ -512,6 +598,30 @@ impl Description {
         let live_in_out = live_in.union(live_out);
         for var in live_in_out.copied() {
             self.get_or_register_persistent_var(var);
+        }
+    }
+
+    fn reserve_rax_and_rdx(
+        &mut self,
+        reg: Reg,
+        op2: Value,
+        instructions: &mut Vec<RaInstr>,
+    ) -> (Reg, Val<RaLevel>) {
+        let val = self.get_val(op2);
+        match (reg, val) {
+            (RAX, Val::Reg(RDX)) => todo!(),
+            (RAX, Val::Reg(reg_op2)) => todo!(),
+            (RDX, Val::Reg(RAX)) => todo!(),
+            (RDX, Val::Reg(reg_op2)) => todo!(),
+            (reg_op1, Val::Reg(RAX)) => todo!(),
+            (reg_op1, Val::Reg(RDX)) => todo!(),
+            (reg_op1, Val::Reg(reg_op2)) => todo!(),
+            (RAX, Val::Instant(_)) => todo!(),
+            (RDX, Val::Instant(_)) => todo!(),
+            (reg_op1, Val::Instant(_)) => todo!(),
+            (RAX, Val::Mem(_)) => todo!(),
+            (RDX, Val::Mem(_)) => todo!(),
+            (reg_op1, Val::Mem(_)) => todo!(),
         }
     }
 }
@@ -677,12 +787,12 @@ impl CFG {
                             RAX,
                             Val::Mem(description.get_variable_mem(*var)),
                         ));
-                        /* let loc = description.get_any_var_loc_preferring_regs(*var, Some(RAX));
+                        let loc = description.get_any_var_loc_preferring_regs(*var, Some(RAX));
                         if matches!(loc, Loc::Reg(RAX)) {
                             // nothing to do
                         } else {
                             instructions.push(RaInstr::MovToReg(RAX, loc.into()))
-                        } */
+                        }
                     }
                 }
                 instructions.push(RaInstr::Ret);
@@ -732,9 +842,9 @@ impl CFG {
                     .unwrap_or_else(|| {
                         let live_atm = self[func_block].flow_analysis.live_before_end_type();
                         let reg = description
-                            .allocate_free_caller_save_reg(*a, live_atm)
+                            .allocate_free_caller_save_any_reg(*a, live_atm)
                             .unwrap_or_else(|| {
-                                description.reallocate_taken_caller_save_reg(
+                                description.reallocate_taken_caller_save_robin_reg(
                                     *a,
                                     live_atm,
                                     instructions,
@@ -820,23 +930,37 @@ impl Quadruple {
         let live_after = &cfg[block_idx].flow_analysis.live_variables[quadruple_idx + 1];
         match self {
             Quadruple::BinOp(dst, op1, bin_op, op2) => {
-                instructions.push(RaInstr::MovToReg(
-                    RAX,
-                    Val::Mem(description.get_variable_mem(*op1)),
-                ));
+                let op1_loc = description.get_any_var_loc_preferring_regs(*op1, Some(RAX)); // for Div/Mod
+                let reg = description.any_reg(*dst).unwrap_or_else(|| match op1_loc {
+                    Loc::Reg(op1_reg) if !live_after.contains(op1) => {
+                        // we can reuse op1_reg
+                        op1_reg
+                    }
+                    _ => {
+                        let reg =
+                            description.allocate_caller_save_reg(*op1, live_before, instructions);
+                        // description.put_to_reg(*op1, reg);
+                        instructions.push(RaInstr::MovToReg(reg, op1_loc.into()));
+                        reg
+                    }
+                });
+                // At this moment, `op1` value resides in `reg`.
+
                 match bin_op {
-                    BinOpType::Add => {
-                        instructions.push(RaInstr::Add(RAX, description.get_val(*op2)));
-                    }
-                    BinOpType::Sub => {
-                        instructions.push(RaInstr::Sub(RAX, description.get_val(*op2)));
-                    }
-                    BinOpType::Mul => {
-                        instructions.push(RaInstr::IMul(RAX, description.get_val(*op2)));
-                    }
-                    BinOpType::Div => {
-                        instructions.push(RaInstr::Cqo);
+                    BinOpType::Add | BinOpType::Sub | BinOpType::Mul => {
                         let val = description.get_val(*op2);
+                        match bin_op {
+                            BinOpType::Add => instructions.push(RaInstr::Add(reg, val)),
+                            BinOpType::Sub => instructions.push(RaInstr::Sub(reg, val)),
+                            BinOpType::Mul => instructions.push(RaInstr::IMul(reg, val)),
+                            _ => unreachable!(),
+                        }
+                        description.variable_mutated(*dst, reg);
+                    }
+                    BinOpType::Div | BinOpType::Mod => {
+                        todo!();
+                        let (reg, val) = description.reserve_rax_and_rdx(reg, *op2, instructions);
+                        instructions.push(RaInstr::Cqo);
                         match val {
                             Val::Reg(reg) => instructions.push(RaInstr::IDivReg(reg)),
                             Val::Instant(_) => {
@@ -845,30 +969,22 @@ impl Quadruple {
                             }
                             Val::Mem(mem) => instructions.push(RaInstr::IDivMem(mem)),
                         }
-                    }
-                    BinOpType::Mod => {
-                        instructions.push(RaInstr::Cqo);
-                        let val = description.get_val(*op2);
-                        match val {
-                            Val::Reg(reg) => instructions.push(RaInstr::IDivReg(reg)),
-                            Val::Instant(_) => {
-                                instructions.push(RaInstr::MovToReg(RCX, val));
-                                instructions.push(RaInstr::IDivReg(RCX));
-                            }
-                            Val::Mem(mem) => instructions.push(RaInstr::IDivMem(mem)),
+                        match bin_op {
+                            BinOpType::Div => description.variable_mutated(*dst, RAX),
+                            BinOpType::Mod => description.variable_mutated(*dst, RDX),
+                            _ => unreachable!(),
                         }
-                        // mov remainder from RDX to RAX:
-                        instructions.push(RaInstr::MovToReg(RAX, Val::Reg(RDX)));
                     }
                 };
-                instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
             }
             Quadruple::UnOp(dst, un_op_type, op) => {
-                instructions.push(RaInstr::MovToReg(RAX, description.get_val(*op)));
+                let reg = description.get_reg_or_allocate(*dst, live_before, instructions);
+
+                instructions.push(RaInstr::MovToReg(reg, description.get_val(*op)));
                 match un_op_type {
-                    UnOpType::Neg => instructions.push(RaInstr::Neg(Loc::Reg(RAX))),
+                    UnOpType::Neg => instructions.push(RaInstr::Neg(Loc::Reg(reg))),
                 }
-                instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
+                description.variable_mutated(*dst, reg);
             }
             Quadruple::Copy(dst, src) => {
                 let reg = description
@@ -887,19 +1003,23 @@ impl Quadruple {
                         .get_any_var_loc_preferring_regs(*src, None)
                         .into(),
                 ));
-                description.put_to_reg(*src, reg);
+                description.variable_mutated(*dst, reg);
                 // instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
             }
             Quadruple::Set(dst, i) => {
-                instructions.push(RaInstr::MovToReg(RAX, Val::Instant(*i)));
-                instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
+                let reg = description.get_reg_or_allocate(*dst, live_before, instructions);
+                instructions.push(RaInstr::MovToReg(reg, Val::Instant(*i)));
+                description.variable_mutated(*dst, reg);
             }
             Quadruple::GetStrLit(dst, str_idx) => {
-                instructions.push(RaInstr::LoadString(RAX, *str_idx));
-                instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
+                let reg = description.get_reg_or_allocate(*dst, live_before, instructions);
+                instructions.push(RaInstr::LoadString(reg, *str_idx));
+                description.variable_mutated(*dst, reg);
             }
 
             Quadruple::Call(dst, func, args) => {
+                description.save_caller_save_regs(live_before, instructions);
+
                 let cfg_function = cfg.functions.get(func).unwrap();
                 let callee_convention = &cfg_function.convention;
                 match callee_convention {
@@ -940,8 +1060,7 @@ impl Quadruple {
                         }
 
                         // Save return value
-                        instructions
-                            .push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
+                        description.variable_mutated(*dst, RAX);
                     }
                     CallingConvention::CdeclFFI => {
                         // place arguments in corresponding registers
@@ -952,8 +1071,7 @@ impl Quadruple {
                         instructions.push(RaInstr::Call(Label::Named(func.clone())));
 
                         // Save return value
-                        instructions
-                            .push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
+                        description.variable_mutated(*dst, RAX);
                     }
                 }
             }
@@ -962,6 +1080,7 @@ impl Quadruple {
             Quadruple::ArrStore(_, _, _) => todo!(),
 
             Quadruple::DerefLoad(dst, ptr) => {
+                todo!();
                 instructions.push(RaInstr::MovToReg(
                     RAX,
                     Val::Mem(description.get_variable_mem(ptr.base)),
@@ -977,6 +1096,7 @@ impl Quadruple {
             }
 
             Quadruple::DerefStore(src, ptr) => {
+                todo!();
                 // src in RAX, ptr in RDX
                 instructions.push(RaInstr::MovToReg(RAX, description.get_val(*src)));
                 instructions.push(RaInstr::MovToReg(
@@ -991,17 +1111,35 @@ impl Quadruple {
             }
 
             Quadruple::InPlaceUnOp(op, ir_loc) => {
-                let loc = Loc::new_from_ir_loc(description, instructions, ir_loc);
+                let loc = {
+                    let var = ir_loc.var();
+                    let reg = description.get_reg_or_allocate(var, live_before, instructions);
+
+                    match ir_loc {
+                        ir::Loc::Var(_) => {
+                            description.variable_mutated(var, reg);
+                            Loc::Reg(reg)
+                        }
+                        ir::Loc::Mem(ir::Mem { offset, .. }) => {
+                            instructions.push(RaInstr::MovToReg(
+                                reg,
+                                Val::Mem(description.get_variable_mem(var)),
+                            ));
+                            Loc::Mem(RaMem::Heap {
+                                base: reg,
+                                displacement: *offset as isize,
+                            })
+                        }
+                    }
+                };
                 match op {
                     ir::InPlaceUnOpType::Inc => instructions.push(RaInstr::Inc(loc)),
                     ir::InPlaceUnOpType::Dec => instructions.push(RaInstr::Dec(loc)),
                 }
-                if let ir::Loc::Var(var) = ir_loc {
-                    instructions.push(RaInstr::MovToMem(description.get_variable_mem(*var), RAX));
-                }
             }
 
             Quadruple::VstStore(class_idx, mem) => {
+                todo!();
                 instructions.push(RaInstr::LeaLabel(R8, cfg.classes[class_idx.0].vst_name()));
                 instructions.push(RaInstr::MovToReg(
                     R9,
@@ -1017,6 +1155,8 @@ impl Quadruple {
             }
 
             Quadruple::VirtualCall(dst, object, method_idx, args) => {
+                description.save_caller_save_regs(live_before, instructions);
+
                 // Params in registers
                 for (reg, arg) in params_registers().zip(args.iter().copied()) {
                     instructions.push(RaInstr::MovToReg(reg, description.get_val(arg)));
@@ -1077,7 +1217,7 @@ impl Quadruple {
                 }
 
                 // Save return value
-                instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
+                description.variable_mutated(*dst, RAX);
             }
         };
     }
