@@ -8,15 +8,23 @@ use hashbrown::{HashMap, HashSet};
 use log::{debug, info, trace};
 use vector_map::VecMap;
 
-use crate::frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS};
-
-use super::ir::{
-    self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, Class, EndType, Instant, Ir,
-    IrFunction, Method, Quadruple, RelOpType, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC,
-    NEW_FUNC,
+use crate::{
+    backend::ra::{RAX, RSP},
+    frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS},
 };
 
-const ARGS_IN_REGISTERS: usize = 6;
+use super::{
+    ir::{
+        self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, Class, EndType, Instant, Ir,
+        IrFunction, Method, Quadruple, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC, NEW_FUNC,
+    },
+    ra::{
+        CalleeSaveReg, CallerSaveReg, FrameOffset, Instr, InstrLevel, Label, Loc, RaLevel, RaMem,
+        Reg, Val, R8, R9, RCX, RDI, RDX, RSI,
+    },
+};
+
+pub const ARGS_IN_REGISTERS: usize = 6;
 pub const QUADWORD_SIZE: usize = 8; // in bytes
 const RETADDR_SIZE: usize = QUADWORD_SIZE;
 
@@ -26,11 +34,53 @@ pub(crate) fn params_registers() -> impl Iterator<Item = Reg> {
 
 type AsmGenResult = io::Result<()>;
 
-enum Loc {
-    Reg(Reg),
-    Mem(Mem),
+type AsmInstr = Instr<AsmLevel>;
+
+struct AsmLevel;
+impl InstrLevel for AsmLevel {
+    type Mem = Mem;
 }
-impl Display for Loc {
+
+impl RaMem {
+    fn into_asm_level(&self, frame: &Frame, rsp_displacement: isize) -> Mem {
+        match *self {
+            RaMem::Stack {
+                frame_offset: offset,
+            } => Mem {
+                word_len: WordLen::Qword,
+                base: RSP,
+                index: None,
+                displacement: {
+                    let displacement =
+                        frame.get_variable_offset_relative_to_rsp(offset, rsp_displacement);
+                    if displacement != 0 {
+                        Some(displacement)
+                    } else {
+                        None
+                    }
+                },
+            },
+            RaMem::Heap { base, displacement } => Mem {
+                word_len: WordLen::Qword,
+                base,
+                index: None,
+                displacement: if displacement != 0 {
+                    Some(displacement)
+                } else {
+                    None
+                },
+            },
+        }
+    }
+}
+
+impl Instr<AsmLevel> {
+    // fn from_ra(: Vec<(Ident, Vec<Instr<RaLevel>>)>) -> Vec<Self> {
+    //     todo!()
+    // }
+}
+
+impl Display for Loc<AsmLevel> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Loc::Reg(reg) => write!(f, "{}", reg),
@@ -39,38 +89,22 @@ impl Display for Loc {
     }
 }
 
-impl Loc {
-    fn new_from_ir_loc(
-        out: &mut impl Write,
-        frame: &Frame,
-        state: &AsmGenState,
-        loc: &ir::Loc,
-    ) -> io::Result<Self> {
-        let var = loc.var();
-        Instr::MovToReg(
-            RAX,
-            Val::Mem(frame.get_variable_mem(var, state.rsp_displacement)),
-        )
-        .emit(out)?;
+impl Loc<RaLevel> {
+    fn into_asm_level(self, frame: &Frame, rsp_displacement: isize) -> Loc<AsmLevel> {
+        // AsmInstr::MovToReg(
+        //     RAX,
+        //     Val::Mem(frame.get_variable_mem(var, state.rsp_displacement)),
+        // )
+        // .emit(out)?;
 
-        Ok(match loc {
-            ir::Loc::Var(_) => Loc::Reg(RAX),
-            ir::Loc::Mem(ir::Mem { offset, .. }) => Loc::Mem(Mem {
-                word_len: WordLen::Qword,
-                base: RAX,
-                index: None,
-                displacement: Some(*offset as isize),
-            }),
-        })
+        match self {
+            Loc::Reg(r) => Loc::Reg(r),
+            Loc::Mem(mem) => Loc::Mem(mem.into_asm_level(frame, rsp_displacement)),
+        }
     }
 }
 
-enum Val {
-    Reg(Reg),
-    Instant(Instant),
-    Mem(Mem),
-}
-impl Display for Val {
+impl Display for Val<AsmLevel> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Val::Reg(reg) => write!(f, "{}", reg),
@@ -143,26 +177,6 @@ impl Display for Mem {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub(crate) enum Reg {
-    CallerSave(CallerSaveReg),
-    CalleeSave(CalleeSaveReg),
-}
-pub(crate) const RAX: Reg = Reg::CallerSave(CallerSaveReg::Rax);
-pub(crate) const RCX: Reg = Reg::CallerSave(CallerSaveReg::Rcx);
-pub(crate) const RDX: Reg = Reg::CallerSave(CallerSaveReg::Rdx);
-pub(crate) const RDI: Reg = Reg::CallerSave(CallerSaveReg::Rdi);
-pub(crate) const RSI: Reg = Reg::CallerSave(CallerSaveReg::Rsi);
-pub(crate) const R8: Reg = Reg::CallerSave(CallerSaveReg::R8);
-pub(crate) const R9: Reg = Reg::CallerSave(CallerSaveReg::R9);
-pub(crate) const R10: Reg = Reg::CallerSave(CallerSaveReg::R10);
-pub(crate) const R11: Reg = Reg::CallerSave(CallerSaveReg::R11);
-pub(crate) const R12: Reg = Reg::CalleeSave(CalleeSaveReg::R12);
-pub(crate) const R13: Reg = Reg::CalleeSave(CalleeSaveReg::R13);
-pub(crate) const R14: Reg = Reg::CalleeSave(CalleeSaveReg::R14);
-pub(crate) const R15: Reg = Reg::CalleeSave(CalleeSaveReg::R15);
-pub(crate) const RSP: Reg = Reg::CalleeSave(CalleeSaveReg::Rsp);
-pub(crate) const RBP: Reg = Reg::CalleeSave(CalleeSaveReg::Rbp);
 impl Display for Reg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -172,18 +186,6 @@ impl Display for Reg {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub(crate) enum CallerSaveReg {
-    Rax,
-    Rcx,
-    Rdx,
-    Rsi,
-    Rdi,
-    R8,
-    R9,
-    R10,
-    R11,
-}
 impl Display for CallerSaveReg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -200,16 +202,6 @@ impl Display for CallerSaveReg {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub(crate) enum CalleeSaveReg {
-    Rbx,
-    Rsp,
-    Rbp,
-    R12,
-    R13,
-    R14,
-    R15,
-}
 impl Display for CalleeSaveReg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -228,12 +220,6 @@ impl Display for CalleeSaveReg {
 #[derive(Debug, Clone, Copy)]
 pub struct Var(isize);
 
-#[derive(Clone, PartialEq, Eq)]
-pub enum Label {
-    Num(usize),
-    Named(Ident),
-    Str(StringLiteral),
-}
 impl Display for Label {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -250,8 +236,6 @@ impl Label {
 }
 
 struct AsmGenState {
-    block_labels: HashMap<BasicBlockIdx, Label>,
-    next_label_idx: usize,
     rsp_displacement: isize, // where is end of the frame relatively to current RSP
     calltime_rsp_position: isize, // rsp displacement at the moment of function call
 }
@@ -259,25 +243,9 @@ struct AsmGenState {
 impl AsmGenState {
     fn new() -> Self {
         Self {
-            block_labels: HashMap::new(),
-            next_label_idx: 0,
             rsp_displacement: 0,
             calltime_rsp_position: 0,
         }
-    }
-
-    fn get_block_label(&mut self, block: BasicBlockIdx) -> Label {
-        self.block_labels.get(&block).cloned().unwrap_or_else(|| {
-            let l = self.gen_label();
-            self.block_labels.insert(block, l.clone());
-            l
-        })
-    }
-
-    fn gen_label(&mut self) -> Label {
-        let label = Label::Num(self.next_label_idx);
-        self.next_label_idx += 1;
-        label
     }
 
     fn enter_frame(&mut self, frame_size: usize) {
@@ -290,122 +258,77 @@ impl AsmGenState {
         );
     }
 
-    fn advance_rsp(&mut self, displacement: isize) -> Instr {
+    fn advance_rsp(&mut self, displacement: isize) -> AsmInstr {
         trace!("Advancing RSP with displacement {}", -displacement);
         self.rsp_displacement += displacement;
-        Instr::Sub(RSP, Val::Instant(Instant(displacement as i64)))
+        AsmInstr::Sub(RSP, Val::Instant(Instant(displacement as i64)))
     }
 
-    fn reset_rsp(&mut self) -> Instr {
+    fn reset_rsp(&mut self) -> AsmInstr {
         let rsp_displacement = self.rsp_displacement;
         trace!("Resetting RSP with displacement {}", rsp_displacement);
         self.rsp_displacement = 0;
-        Instr::Add(RSP, Val::Instant(Instant(rsp_displacement as i64)))
+        AsmInstr::Add(RSP, Val::Instant(Instant(rsp_displacement as i64)))
     }
 
-    fn leave(&mut self) -> Instr {
+    fn leave(&mut self) -> AsmInstr {
         assert_eq!(self.rsp_displacement, 0);
         // self.rsp_displacement = self.calltime_rsp_position; // this should not happen not to affect other code paths
-        Instr::Sub(
+        AsmInstr::Sub(
             RSP,
             Val::Instant(Instant(self.calltime_rsp_position as i64)),
         )
     }
 }
 
-#[must_use]
-enum Instr {
-    Jmp(Label),
-    Jz(Label),
-    Jnz(Label),
-    Jg(Label),
-    Jge(Label),
-    Jl(Label),
-    Jle(Label),
-
-    LoadString(Reg, StringLiteral),
-    MovToReg(Reg, Val),
-    MovToMem(Mem, Reg),
-
-    Test(Reg),
-    Cmp(Reg, Val),
-    Add(Reg, Val),
-    Sub(Reg, Val),
-    IMul(Reg, Val),
-    IDivReg(Reg), // RDX:RAX divided by Reg, quotient in RAX, remainder in RDX.
-    IDivMem(Mem), // RDX:RAX divided by Mem, quotient in RAX, remainder in RDX.
-    Cqo,          // Prepared RDX as empty for IDiv
-    Inc(Loc),
-    Dec(Loc),
-    Neg(Loc),
-    Not(Reg),
-    Sal(Reg, Instant),
-    Sar(Reg, Instant),
-
-    Lea(Reg, Mem),
-    LeaLabel(Reg, String),
-
-    Push(Val),
-
-    Ret,
-    Call(Label),
-    CallReg(Reg),
-}
-
-impl Instr {
+impl AsmInstr {
     fn emit(&self, out: &mut impl Write) -> AsmGenResult {
+        if let AsmInstr::Label(l) = self {
+            l.emit(out)?;
+            return Ok(());
+        }
         write!(out, "\t")?;
         match self {
-            Instr::Jmp(label) => writeln!(out, "jmp {}", label),
-            Instr::Jz(label) => writeln!(out, "jz {}", label),
-            Instr::Jnz(label) => writeln!(out, "jnz {}", label),
-            Instr::Jg(label) => writeln!(out, "jg {}", label),
-            Instr::Jge(label) => writeln!(out, "jge {}", label),
-            Instr::Jl(label) => writeln!(out, "jl {}", label),
-            Instr::Jle(label) => writeln!(out, "jle {}", label),
+            AsmInstr::Empty => writeln!(out, ""),
+            AsmInstr::Jmp(label) => writeln!(out, "jmp {}", label),
+            AsmInstr::Jz(label) => writeln!(out, "jz {}", label),
+            AsmInstr::Jnz(label) => writeln!(out, "jnz {}", label),
+            AsmInstr::Jg(label) => writeln!(out, "jg {}", label),
+            AsmInstr::Jge(label) => writeln!(out, "jge {}", label),
+            AsmInstr::Jl(label) => writeln!(out, "jl {}", label),
+            AsmInstr::Jle(label) => writeln!(out, "jle {}", label),
 
-            Instr::MovToReg(reg, val) => writeln!(out, "mov {}, {}", reg, val),
-            Instr::MovToMem(mem, reg) => writeln!(out, "mov {}, {}", mem, reg),
+            AsmInstr::MovToReg(reg, val) => writeln!(out, "mov {}, {}", reg, val),
+            AsmInstr::MovToMem(mem, reg) => writeln!(out, "mov {}, {}", mem, reg),
 
-            Instr::Test(reg) => writeln!(out, "test {}, {}", reg, reg),
-            Instr::Cmp(reg, val) => writeln!(out, "cmp {}, {}", reg, val),
-            Instr::Add(reg, val) => writeln!(out, "add {}, {}", reg, val),
-            Instr::Sub(reg, val) => writeln!(out, "sub {}, {}", reg, val),
-            Instr::IMul(reg, val) => writeln!(out, "imul {}, {}", reg, val),
-            Instr::IDivReg(reg) => writeln!(out, "idiv {}", reg),
-            Instr::IDivMem(mem) => writeln!(out, "idiv {}", mem),
-            Instr::Cqo => writeln!(out, "cqo"),
-            Instr::Inc(reg) => writeln!(out, "inc {}", reg),
-            Instr::Dec(reg) => writeln!(out, "dec {}", reg),
-            Instr::Neg(reg) => writeln!(out, "neg {}", reg),
-            Instr::Not(reg) => writeln!(out, "not {}", reg),
-            Instr::Sal(reg, i) => writeln!(out, "sal {}, {}", reg, **i),
-            Instr::Sar(reg, i) => writeln!(out, "sar {}, {}", reg, **i),
+            AsmInstr::Test(reg) => writeln!(out, "test {}, {}", reg, reg),
+            AsmInstr::Cmp(reg, val) => writeln!(out, "cmp {}, {}", reg, val),
+            AsmInstr::Add(reg, val) => writeln!(out, "add {}, {}", reg, val),
+            AsmInstr::Sub(reg, val) => writeln!(out, "sub {}, {}", reg, val),
+            AsmInstr::IMul(reg, val) => writeln!(out, "imul {}, {}", reg, val),
+            AsmInstr::IDivReg(reg) => writeln!(out, "idiv {}", reg),
+            AsmInstr::IDivMem(mem) => writeln!(out, "idiv {}", mem),
+            AsmInstr::Cqo => writeln!(out, "cqo"),
+            AsmInstr::Inc(loc) => writeln!(out, "inc {}", loc),
+            AsmInstr::Dec(loc) => writeln!(out, "dec {}", loc),
+            AsmInstr::Neg(loc) => writeln!(out, "neg {}", loc),
+            AsmInstr::Not(loc) => writeln!(out, "not {}", loc),
+            AsmInstr::Sal(reg, i) => writeln!(out, "sal {}, {}", reg, **i),
+            AsmInstr::Sar(reg, i) => writeln!(out, "sar {}, {}", reg, **i),
 
-            Instr::Lea(reg, mem) => writeln!(out, "lea {}, {}", reg, mem),
-            Instr::LeaLabel(reg, label) => writeln!(out, "lea {}, [rel {}]", reg, label),
+            AsmInstr::Lea(reg, mem) => writeln!(out, "lea {}, {}", reg, mem),
+            AsmInstr::LeaLabel(reg, label) => writeln!(out, "lea {}, [rel {}]", reg, label),
 
-            Instr::Push(val) => writeln!(out, "push {}", val),
+            AsmInstr::Push(val) => writeln!(out, "push {}", val),
 
-            Instr::Ret => writeln!(out, "ret"),
-            Instr::Call(label) => writeln!(out, "call {}", label),
-            Instr::CallReg(reg) => writeln!(out, "call {}", reg),
+            AsmInstr::Ret => writeln!(out, "ret"),
+            AsmInstr::Call(label) => writeln!(out, "call {}", label),
+            AsmInstr::CallReg(reg) => writeln!(out, "call {}", reg),
 
-            Instr::LoadString(reg, idx) => writeln!(out, "lea {}, [rel {}]", reg, Label::Str(*idx)),
-        }
-    }
-}
-
-impl RelOpType {
-    fn instrs(&self) -> (fn(Label) -> Instr, fn(Label) -> Instr) {
-        // (then, else)
-        match self {
-            RelOpType::Gt => (Instr::Jg, Instr::Jle),
-            RelOpType::Ge => (Instr::Jge, Instr::Jl),
-            RelOpType::Lt => (Instr::Jl, Instr::Jge),
-            RelOpType::Le => (Instr::Jle, Instr::Jg),
-            RelOpType::Eq => (Instr::Jz, Instr::Jnz),
-            RelOpType::NEq => (Instr::Jnz, Instr::Jz),
+            AsmInstr::LoadString(reg, idx) => {
+                writeln!(out, "lea {}, [rel {}]", reg, Label::Str(*idx))
+            }
+            Instr::Label(_) => unreachable!(),
         }
     }
 }
@@ -422,64 +345,50 @@ impl RelOpType {
  */
 
 #[derive(Debug)]
-struct Frame {
-    name: Ident,
-    // convention: CallingConvention,
-    params: Vec<ir::Var>,
+pub(crate) struct Frame {
+    pub(crate) name: Ident,
+    pub(crate) params: Vec<FrameOffset>,
     local_variables_count: usize,
-    variables_mapping: VecMap<ir::Var, Var>, // var -> offset wrt RBP (frame)
-    frame_size: usize,                       // in bytes, must be divisible by 16
+    // variables_mapping: VecMap<ir::Var, Var>, // var -> offset wrt RBP (frame)
+    frame_size: usize, // in bytes, must be divisible by 16
 }
 
 impl Frame {
-    fn new(
+    pub(crate) fn new(
         name: Ident,
         _stack_parameters_count: usize,
-        params: Vec<ir::Var>,
-        variables: HashSet<ir::Var>,
+        params: Vec<FrameOffset>,
+        local_variables_count: usize,
+        // variables: HashSet<ir::Var>,
     ) -> Self {
-        debug!("Creating frame with variables: {:?}", variables);
-        let variables_mapping = variables
-            .into_iter()
-            .enumerate()
-            .map(|(k, var)| (var, Var(k as isize * -8)))
-            .collect::<VecMap<_, _>>();
-        trace!("Variables got mappings: {:?}", &variables_mapping);
+        debug!("Creating frame for {} variables", local_variables_count);
+        // let variables_mapping = variables
+        //     .into_iter()
+        //     .enumerate()
+        //     .map(|(k, var)| (var, Var(k as isize * -8)))
+        //     .collect::<VecMap<_, _>>();
+        // trace!("Variables got mappings: {:?}", &variables_mapping);
 
         Self {
             name,
-            // convention: CallingConvention::StackVars,
-            local_variables_count: variables_mapping.len(),
-            frame_size: ((variables_mapping.len() + 1/*retaddr*/) * QUADWORD_SIZE + QUADWORD_SIZE)
+            local_variables_count,
+            frame_size: ((local_variables_count + 1/*retaddr*/) * QUADWORD_SIZE + QUADWORD_SIZE)
                 / 16
                 * 16, /*stack alignment*/
-            variables_mapping,
             params,
         }
     }
 
-    fn new_ffi(name: Ident, params: Vec<ir::Var>) -> Self {
+    pub(crate) fn new_ffi(name: Ident, params: Vec<FrameOffset>) -> Self {
         Self {
             name,
-            // convention: CallingConvention::Cdecl,
             local_variables_count: 0,
-            variables_mapping: VecMap::new(),
             frame_size: RETADDR_SIZE,
             params,
         }
     }
 
-    fn get_variable_offset_relative_to_frame(&self, variable: ir::Var) -> isize {
-        let res = self
-            .variables_mapping
-            .get(&variable)
-            .unwrap_or_else(|| panic!("{:?} not registered in frame: {:#?}.", variable, self))
-            .0;
-        // trace!("Queried {:?} frame offset, got {}.", variable, res);
-        res
-    }
-
-    fn get_variable_offset_relative_to_frame_end(&self, variable: ir::Var) -> isize {
+    fn get_variable_offset_relative_to_frame_end(&self, offset: FrameOffset) -> isize {
         //                  by frame   by rsp
         // RET_ADDR         - +8    -  +24
         // a                -  0    -  +16
@@ -499,7 +408,7 @@ impl Frame {
         // CALLEE_RET_ADDR  - -40   -  -8
         // frame_size = 48
         // b <- frame + -8
-        let res = self.get_variable_offset_relative_to_frame(variable) + self.frame_size as isize
+        let res = isize::from(offset) + self.frame_size as isize
             - RETADDR_SIZE as isize
             - QUADWORD_SIZE as isize;
         // trace!("Queried {:?} retaddr offset, got {}.", variable, res);
@@ -508,10 +417,10 @@ impl Frame {
 
     fn get_variable_offset_relative_to_rsp(
         &self,
-        variable: ir::Var,
+        offset: FrameOffset,
         rsp_displacement: isize,
     ) -> isize {
-        let res = self.get_variable_offset_relative_to_frame_end(variable) + rsp_displacement;
+        let res = self.get_variable_offset_relative_to_frame_end(offset) + rsp_displacement;
         // trace!(
         //     "Queried {:?} offset relative to rsp, got {}.",
         //     variable, res
@@ -519,29 +428,32 @@ impl Frame {
         res
     }
 
-    fn get_variable_mem(&self, variable: ir::Var, rsp_displacement: isize) -> Mem {
+    fn get_variable_mem(&self, offset: FrameOffset, rsp_displacement: isize) -> Mem {
         Mem {
             word_len: WordLen::Qword,
             base: RSP,
             index: None,
-            displacement: Some(
-                self.get_variable_offset_relative_to_rsp(variable, rsp_displacement),
-            ),
+            displacement: Some(self.get_variable_offset_relative_to_rsp(offset, rsp_displacement)),
         }
     }
 
-    fn get_val(&self, val: ir::Value, rsp_displacement: isize) -> Val {
+    fn get_val(&self, val: Val<RaLevel>, rsp_displacement: isize) -> Val<AsmLevel> {
         match val {
-            ir::Value::Instant(i) => Val::Instant(i),
-            ir::Value::Variable(var) => Val::Mem(self.get_variable_mem(var, rsp_displacement)),
+            Val::Instant(i) => Val::Instant(i),
+            Val::Reg(reg) => Val::Reg(reg),
+            Val::Mem(ra_mem) => Val::Mem(ra_mem.into_asm_level(self, rsp_displacement)),
         }
     }
 }
 
 impl Ir {
     pub fn emit_assembly(&self, out: &mut impl Write) -> AsmGenResult {
+        info!("---- COMPILING TO ASSEMBLY INSTRUCTIONS ----");
+        let (instructions, frames) = self.cfg.asm_instructions();
+
         info!("---- ASSEMBLY EMITTING ----");
-        self.cfg.emit_assembly(out, &self.string_literals)
+        self.cfg
+            .emit_assembly(out, &self.string_literals, instructions, frames)
     }
 }
 
@@ -550,122 +462,67 @@ impl CFG {
         &self,
         out: &mut impl Write,
         string_literals: &Vec<String>,
+        instructions: Vec<(Ident, Vec<Instr<RaLevel>>)>,
+        frames: HashMap<Ident, Frame>,
     ) -> AsmGenResult {
         writeln!(out, "section .data")?;
         emit_string_literals(out, string_literals)?;
 
         let mut state = AsmGenState::new();
 
-        info!("Building frames");
-        let frames = self
-            .functions
-            .iter()
-            .map(
-                |(
-                    func,
-                    IrFunction {
-                        params, convention, ..
-                    },
-                )| {
-                    (
-                        func.clone(),
-                        match convention {
-                            CallingConvention::SimpleCdecl => {
-                                let mut variables = self.variables_in_function(func);
-                                variables.extend(params);
-                                Frame::new(
-                                    func.clone(),
-                                    isize::max(
-                                        params.len() as isize - ARGS_IN_REGISTERS as isize,
-                                        0,
-                                    ) as usize,
-                                    params.clone(),
-                                    variables,
-                                )
-                            }
-                            CallingConvention::CdeclFFI => {
-                                Frame::new_ffi(func.clone(), params.clone())
-                            }
-                        },
-                    )
-                },
-            )
-            .collect::<HashMap<_, _>>();
-
-        debug!("Built frames: {:#?}", &frames);
-
         writeln!(out, "\nsection .text")?;
         emit_vsts(out, &self.classes)?;
 
         emit_header(out)?;
 
-        let mut emitted = HashSet::new();
+        for (func, instructions) in instructions {
+            info!("Emitting function: {}", func);
+            writeln!(out, "")?;
+            Label::Named(func.clone()).emit(out)?;
+            let frame = frames.get(&func).unwrap();
 
-        for (
-            func,
-            IrFunction {
-                entry, convention, ..
-            },
-        ) in self.functions.iter()
-        {
-            let frame = frames.get(func).unwrap();
-            if matches!(convention, CallingConvention::SimpleCdecl) {
-                // assert_eq!(state.rsp_displacement, 0); // RSP initially set to ret addr
-                let func_label = Label::Named(func.clone());
+            state.enter_frame(frame.frame_size);
+            let stack_growth = frame.frame_size - RETADDR_SIZE;
+            if stack_growth != 0 {
+                state.reset_rsp().emit(out)?;
+            }
 
-                info!("Emitting function: {}", func);
-                writeln!(out, "")?;
-                func_label.emit(out)?;
-
-                state.enter_frame(frame.frame_size);
-                let stack_growth = frame.frame_size - RETADDR_SIZE;
-                if stack_growth != 0 {
-                    state.reset_rsp().emit(out)?;
-                }
-
-                // Params in registers
-                for (var, reg) in frame.params.iter().copied().zip(params_registers()) {
-                    Instr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), reg)
-                        .emit(out)?;
-                }
-                // Params on the stack
-                for (no, var) in frame
-                    .params
-                    .iter()
-                    .copied()
-                    .skip(params_registers().count())
-                    .enumerate()
-                {
-                    Instr::MovToReg(
-                        RAX,
-                        Val::Mem(Mem {
-                            word_len: WordLen::Qword,
-                            base: RSP,
-                            index: None,
-                            displacement: Some((frame.frame_size + no * QUADWORD_SIZE) as isize),
-                        }),
-                    )
+            // Params in registers
+            for (var, reg) in frame.params.iter().copied().zip(params_registers()) {
+                AsmInstr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), reg)
                     .emit(out)?;
-                    Instr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), RAX)
-                        .emit(out)?;
-                }
+            }
+            // Params on the stack
+            // TODO: do not copy them, use as-are, on the other side of the return address.
+            for (no, offset) in frame
+                .params
+                .iter()
+                .copied()
+                .skip(params_registers().count())
+                .enumerate()
+            {
+                AsmInstr::MovToReg(
+                    RAX,
+                    Val::Mem(Mem {
+                        word_len: WordLen::Qword,
+                        base: RSP,
+                        index: None,
+                        displacement: Some((frame.frame_size + no * QUADWORD_SIZE) as isize),
+                    }),
+                )
+                .emit(out)?;
+                AsmInstr::MovToMem(frame.get_variable_mem(offset, state.rsp_displacement), RAX)
+                    .emit(out)?;
+            }
 
-                self.emit_function_block(
-                    out,
-                    entry.unwrap(),
-                    &mut emitted,
-                    &frames,
-                    frame,
-                    &mut state,
-                    None,
-                )?;
+            for instr in instructions {
+                instr.convert(frame, state.rsp_displacement).emit(out)?;
             }
         }
-
         Ok(())
     }
 
-    fn emit_function_block(
+    /* fn emit_function_block(
         &self,
         out: &mut impl Write,
         func_block: BasicBlockIdx,
@@ -697,12 +554,12 @@ impl CFG {
                 if stack_growth != 0 {
                     state.leave().emit(out)?;
                 }
-                Instr::Ret.emit(out)?;
+                AsmInstr::Ret.emit(out)?;
             }
             Some(EndType::Return(Some(val))) => {
                 match val {
-                    ir::Value::Instant(i) => Instr::MovToReg(RAX, Val::Instant(*i)).emit(out)?,
-                    ir::Value::Variable(var) => Instr::MovToReg(
+                    ir::Value::Instant(i) => AsmInstr::MovToReg(RAX, Val::Instant(*i)).emit(out)?,
+                    ir::Value::Variable(var) => AsmInstr::MovToReg(
                         RAX,
                         Val::Mem(frame.get_variable_mem(*var, state.rsp_displacement)),
                     )
@@ -712,13 +569,13 @@ impl CFG {
                 if stack_growth != 0 {
                     state.leave().emit(out)?;
                 }
-                Instr::Ret.emit(out)?;
+                AsmInstr::Ret.emit(out)?;
             }
             Some(EndType::Goto(block_idx)) => {
                 // If not emitted yet, simply emit it below and save a jump
                 if emitted.contains(block_idx) && next_l != Some(&state.get_block_label(*block_idx))
                 {
-                    Instr::Jmp(state.get_block_label(*block_idx).clone()).emit(out)?;
+                    AsmInstr::Jmp(state.get_block_label(*block_idx).clone()).emit(out)?;
                 }
                 self.emit_function_block(out, *block_idx, emitted, frames, frame, state, next_l)?;
             }
@@ -728,7 +585,7 @@ impl CFG {
                 // If not emitted yet, simply emit it below and save a jump
                 if emitted.contains(block_idx) && next_l != Some(&state.get_block_label(*block_idx))
                 {
-                    Instr::Jmp(state.get_block_label(*block_idx).clone()).emit(out)?;
+                    AsmInstr::Jmp(state.get_block_label(*block_idx).clone()).emit(out)?;
                 }
                 self.emit_function_block(out, *block_idx, emitted, frames, frame, state, next_l)?;
             }
@@ -737,12 +594,12 @@ impl CFG {
                 let else_l = state.get_block_label(*else_block).clone();
 
                 // Cond
-                Instr::MovToReg(
+                AsmInstr::MovToReg(
                     RAX,
                     Val::Mem(frame.get_variable_mem(*a, state.rsp_displacement)),
                 )
                 .emit(out)?;
-                Instr::Cmp(RAX, frame.get_val(*b, state.rsp_displacement)).emit(out)?;
+                AsmInstr::Cmp(RAX, frame.get_val(*b, state.rsp_displacement)).emit(out)?;
 
                 let (then_instr, else_instr) = rel.instrs();
 
@@ -753,7 +610,7 @@ impl CFG {
                 } else {
                     else_instr(else_l.clone()).emit(out)?;
                     if emitted.contains(then_block) {
-                        Instr::Jmp(then_l).emit(out)?;
+                        AsmInstr::Jmp(then_l).emit(out)?;
                     }
                     // Then
                     self.emit_function_block(
@@ -780,10 +637,10 @@ impl CFG {
             }
         }
         Ok(())
-    }
+    } */
 }
 
-impl BasicBlock {
+/* impl BasicBlock {
     fn emit(
         &self,
         cfg: &CFG,
@@ -797,9 +654,9 @@ impl BasicBlock {
 
         Ok(())
     }
-}
+} */
 
-impl Quadruple {
+/* impl Quadruple {
     fn emit(
         &self,
         cfg: &CFG,
@@ -809,77 +666,77 @@ impl Quadruple {
     ) -> AsmGenResult {
         match self {
             Quadruple::BinOp(dst, op1, bin_op, op2) => {
-                Instr::MovToReg(
+                AsmInstr::MovToReg(
                     RAX,
                     Val::Mem(frame.get_variable_mem(*op1, state.rsp_displacement)),
                 )
                 .emit(out)?;
                 match bin_op {
                     BinOpType::Add => {
-                        Instr::Add(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
+                        AsmInstr::Add(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
                     }
                     BinOpType::Sub => {
-                        Instr::Sub(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
+                        AsmInstr::Sub(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
                     }
                     BinOpType::Mul => {
-                        Instr::IMul(RAX, frame.get_val(*op2, state.rsp_displacement)).emit(out)?
+                        AsmInstr::IMul(RAX, frame.get_val(*op2, state.rsp_displacement))
+                            .emit(out)?
                     }
                     BinOpType::Div => {
-                        Instr::Cqo.emit(out)?;
+                        AsmInstr::Cqo.emit(out)?;
                         let val = frame.get_val(*op2, state.rsp_displacement);
                         match val {
-                            Val::Reg(reg) => Instr::IDivReg(reg).emit(out)?,
+                            Val::Reg(reg) => AsmInstr::IDivReg(reg).emit(out)?,
                             Val::Instant(_) => {
-                                Instr::MovToReg(RCX, val).emit(out)?;
-                                Instr::IDivReg(RCX).emit(out)?;
+                                AsmInstr::MovToReg(RCX, val).emit(out)?;
+                                AsmInstr::IDivReg(RCX).emit(out)?;
                             }
-                            Val::Mem(mem) => Instr::IDivMem(mem).emit(out)?,
+                            Val::Mem(mem) => AsmInstr::IDivMem(mem).emit(out)?,
                         }
                     }
                     BinOpType::Mod => {
-                        Instr::Cqo.emit(out)?;
+                        AsmInstr::Cqo.emit(out)?;
                         let val = frame.get_val(*op2, state.rsp_displacement);
                         match val {
-                            Val::Reg(reg) => Instr::IDivReg(reg).emit(out)?,
+                            Val::Reg(reg) => AsmInstr::IDivReg(reg).emit(out)?,
                             Val::Instant(_) => {
-                                Instr::MovToReg(RCX, val).emit(out)?;
-                                Instr::IDivReg(RCX).emit(out)?;
+                                AsmInstr::MovToReg(RCX, val).emit(out)?;
+                                AsmInstr::IDivReg(RCX).emit(out)?;
                             }
-                            Val::Mem(mem) => Instr::IDivMem(mem).emit(out)?,
+                            Val::Mem(mem) => AsmInstr::IDivMem(mem).emit(out)?,
                         }
                         // mov remainder from RDX to RAX:
-                        Instr::MovToReg(RAX, Val::Reg(RDX)).emit(out)?;
+                        AsmInstr::MovToReg(RAX, Val::Reg(RDX)).emit(out)?;
                     }
                 };
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                AsmInstr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?
             }
             Quadruple::UnOp(dst, un_op_type, op) => {
-                Instr::MovToReg(RAX, frame.get_val(*op, state.rsp_displacement)).emit(out)?;
+                AsmInstr::MovToReg(RAX, frame.get_val(*op, state.rsp_displacement)).emit(out)?;
                 match un_op_type {
-                    UnOpType::Not => Instr::Not(RAX).emit(out)?,
-                    UnOpType::Neg => Instr::Neg(Loc::Reg(RAX)).emit(out)?,
+                    UnOpType::Neg => AsmInstr::Neg(Loc::Reg(RAX)).emit(out)?,
                 }
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                AsmInstr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
             }
             Quadruple::Copy(dst, src) => {
-                Instr::MovToReg(
+                AsmInstr::MovToReg(
                     RAX,
                     Val::Mem(frame.get_variable_mem(*src, state.rsp_displacement)),
                 )
                 .emit(out)?;
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                AsmInstr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
             }
             Quadruple::Set(dst, i) => {
-                Instr::MovToReg(RAX, Val::Instant(*i)).emit(out)?;
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                AsmInstr::MovToReg(RAX, Val::Instant(*i)).emit(out)?;
+                AsmInstr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
             }
             Quadruple::GetStrLit(dst, str_idx) => {
-                Instr::LoadString(RAX, *str_idx).emit(out)?;
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                AsmInstr::LoadString(RAX, *str_idx).emit(out)?;
+                AsmInstr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
             }
 
@@ -890,7 +747,7 @@ impl Quadruple {
                     CallingConvention::SimpleCdecl => {
                         // Params in registers
                         for (reg, arg) in params_registers().zip(args.iter().copied()) {
-                            Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
+                            AsmInstr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
                                 .emit(out)?;
                         }
 
@@ -913,59 +770,38 @@ impl Quadruple {
 
                         // Params on the stack
                         for arg in args.iter().copied().skip(params_registers().count()).rev() {
-                            Instr::Push(frame.get_val(arg, state.rsp_displacement)).emit(out)?;
+                            AsmInstr::Push(frame.get_val(arg, state.rsp_displacement)).emit(out)?;
                             state.rsp_displacement += QUADWORD_SIZE as isize;
                         }
 
-                        // // place arguments in corresponding callee's variables
-                        // for (arg, param) in args.iter().copied().zip(callee_params.iter().copied())
-                        // {
-                        //     Instr::MovToReg(RAX, frame.get_val(arg, state.rsp_displacement))
-                        //         .emit(out)?;
-                        //     Instr::MovToMem(
-                        //         callee_frame.get_variable_mem(param, -(RETADDR_SIZE as isize)),
-                        //         RAX,
-                        //     )
-                        //     .emit(out)?;
-                        // }
-
-                        Instr::Call(Label::Named(func.clone())).emit(out)?;
+                        AsmInstr::Call(Label::Named(func.clone())).emit(out)?;
 
                         if stack_alignment_growth != 0 || params_on_the_stack_num > 0 {
                             state.reset_rsp().emit(out)?;
                         }
 
                         // Save return value
-                        Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
-                            .emit(out)?;
+                        AsmInstr::MovToMem(
+                            frame.get_variable_mem(*dst, state.rsp_displacement),
+                            RAX,
+                        )
+                        .emit(out)?;
                     }
                     CallingConvention::CdeclFFI => {
                         // place arguments in corresponding registers
                         for (arg, reg) in args.iter().copied().zip(params_registers()) {
-                            Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
+                            AsmInstr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
                                 .emit(out)?;
                         }
 
-                        // stack alignment, as no params on the stack
-                        // Instr::Sub(RSP, Val::Instant(Instant(8))).emit(out)?;
-
-                        // // sanity alignment check
-                        // // before call, the stack must be aligned to 0 mod 16
-                        // Instr::MovToReg(RAX, Val::Reg(RSP)).emit(out)?;
-                        // Instr::Cqo.emit(out)?;
-                        // Instr::MovToReg(RCX, Val::Instant(Instant(16))).emit(out)?;
-                        // Instr::IDivReg(RCX).emit(out)?;
-                        // // mov remainder from RDX to RAX:
-                        // Instr::Test(RDX).emit(out)?;
-                        // Instr::Jnz(Label::Func(Ident::from("_notaligned"))).emit(out)?;
-
-                        Instr::Call(Label::Named(func.clone())).emit(out)?;
-
-                        // Instr::Add(RSP, Val::Instant(Instant(8))).emit(out)?;
+                        AsmInstr::Call(Label::Named(func.clone())).emit(out)?;
 
                         // Save return value
-                        Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
-                            .emit(out)?;
+                        AsmInstr::MovToMem(
+                            frame.get_variable_mem(*dst, state.rsp_displacement),
+                            RAX,
+                        )
+                        .emit(out)?;
                     }
                 }
             }
@@ -974,12 +810,12 @@ impl Quadruple {
             Quadruple::ArrStore(_, _, _) => todo!(),
 
             Quadruple::DerefLoad(dst, ptr) => {
-                Instr::MovToReg(
+                AsmInstr::MovToReg(
                     RAX,
                     Val::Mem(frame.get_variable_mem(ptr.base, state.rsp_displacement)),
                 )
                 .emit(out)?;
-                Instr::MovToReg(
+                AsmInstr::MovToReg(
                     RAX,
                     Val::Mem(Mem {
                         word_len: WordLen::Qword,
@@ -989,14 +825,14 @@ impl Quadruple {
                     }),
                 )
                 .emit(out)?;
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                AsmInstr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
             }
 
             Quadruple::DerefStore(src, ptr) => {
                 // src in RAX, ptr in RDX
-                Instr::MovToReg(RAX, frame.get_val(*src, state.rsp_displacement)).emit(out)?;
-                Instr::MovToReg(
+                AsmInstr::MovToReg(RAX, frame.get_val(*src, state.rsp_displacement)).emit(out)?;
+                AsmInstr::MovToReg(
                     RDX,
                     Val::Mem(frame.get_variable_mem(ptr.base, state.rsp_displacement)),
                 )
@@ -1007,29 +843,29 @@ impl Quadruple {
                     index: None,
                     displacement: Some(ptr.offset as isize),
                 };
-                Instr::MovToMem(ptr_mem, RAX).emit(out)?;
+                AsmInstr::MovToMem(ptr_mem, RAX).emit(out)?;
             }
 
             Quadruple::InPlaceUnOp(op, ir_loc) => {
                 let loc = Loc::new_from_ir_loc(out, frame, state, ir_loc)?;
                 match op {
-                    ir::InPlaceUnOpType::Inc => Instr::Inc(loc).emit(out)?,
-                    ir::InPlaceUnOpType::Dec => Instr::Dec(loc).emit(out)?,
+                    ir::InPlaceUnOpType::Inc => AsmInstr::Inc(loc).emit(out)?,
+                    ir::InPlaceUnOpType::Dec => AsmInstr::Dec(loc).emit(out)?,
                 }
                 if let ir::Loc::Var(var) = ir_loc {
-                    Instr::MovToMem(frame.get_variable_mem(*var, state.rsp_displacement), RAX)
+                    AsmInstr::MovToMem(frame.get_variable_mem(*var, state.rsp_displacement), RAX)
                         .emit(out)?;
                 }
             }
 
             Quadruple::VstStore(class_idx, mem) => {
-                Instr::LeaLabel(R8, cfg.classes[class_idx.0].vst_name()).emit(out)?;
-                Instr::MovToReg(
+                AsmInstr::LeaLabel(R8, cfg.classes[class_idx.0].vst_name()).emit(out)?;
+                AsmInstr::MovToReg(
                     R9,
                     Val::Mem(frame.get_variable_mem(mem.base, state.rsp_displacement)),
                 )
                 .emit(out)?;
-                Instr::MovToMem(
+                AsmInstr::MovToMem(
                     Mem {
                         word_len: WordLen::Qword,
                         base: R9,
@@ -1044,7 +880,8 @@ impl Quadruple {
             Quadruple::VirtualCall(dst, object, method_idx, args) => {
                 // Params in registers
                 for (reg, arg) in params_registers().zip(args.iter().copied()) {
-                    Instr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement)).emit(out)?;
+                    AsmInstr::MovToReg(reg, frame.get_val(arg, state.rsp_displacement))
+                        .emit(out)?;
                 }
 
                 let params_on_the_stack_num = usize::max(
@@ -1066,19 +903,19 @@ impl Quadruple {
 
                 // Params on the stack
                 for arg in args.iter().copied().skip(params_registers().count()).rev() {
-                    Instr::Push(frame.get_val(arg, state.rsp_displacement)).emit(out)?;
+                    AsmInstr::Push(frame.get_val(arg, state.rsp_displacement)).emit(out)?;
                     state.rsp_displacement += QUADWORD_SIZE as isize;
                 }
 
                 // Get the object
-                Instr::MovToReg(
+                AsmInstr::MovToReg(
                     RAX,
                     Val::Mem(frame.get_variable_mem(*object, state.rsp_displacement)),
                 )
                 .emit(out)?;
 
                 // Get VST ptr from the object
-                Instr::MovToReg(
+                AsmInstr::MovToReg(
                     RAX,
                     Val::Mem(Mem {
                         word_len: WordLen::Qword,
@@ -1090,7 +927,7 @@ impl Quadruple {
                 .emit(out)?;
 
                 // Virtual call: get method address from VST
-                Instr::MovToReg(
+                AsmInstr::MovToReg(
                     RAX,
                     Val::Mem(Mem {
                         word_len: WordLen::Qword,
@@ -1101,18 +938,60 @@ impl Quadruple {
                 )
                 .emit(out)?;
 
-                Instr::CallReg(RAX).emit(out)?;
+                AsmInstr::CallReg(RAX).emit(out)?;
 
                 if stack_alignment_growth != 0 || params_on_the_stack_num > 0 {
                     state.reset_rsp().emit(out)?;
                 }
 
                 // Save return value
-                Instr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
+                AsmInstr::MovToMem(frame.get_variable_mem(*dst, state.rsp_displacement), RAX)
                     .emit(out)?;
             }
         };
         Ok(())
+    }
+} */
+
+impl Instr<RaLevel> {
+    fn convert(self, frame: &Frame, rsp_displacement: isize) -> AsmInstr {
+        match self {
+            Instr::Jmp(l) => Instr::Jmp(l),
+            Instr::Jz(l) => Instr::Jz(l),
+            Instr::Jnz(l) => Instr::Jnz(l),
+            Instr::Jg(l) => Instr::Jg(l),
+            Instr::Jge(l) => Instr::Jge(l),
+            Instr::Jl(l) => Instr::Jl(l),
+            Instr::Jle(l) => Instr::Jle(l),
+            Instr::Empty => Instr::Empty,
+            Instr::Label(l) => Instr::Label(l),
+            Instr::Test(reg) => Instr::Test(reg),
+            Instr::LoadString(reg, lit) => Instr::LoadString(reg, lit),
+            Instr::Cqo => Instr::Cqo,
+            Instr::Sal(reg, i) => Instr::Sal(reg, i),
+            Instr::Sar(reg, i) => Instr::Sar(reg, i),
+            Instr::Ret => Instr::Ret,
+            Instr::LeaLabel(reg, l) => Instr::LeaLabel(reg, l),
+            Instr::Call(l) => Instr::Call(l),
+            Instr::CallReg(reg) => Instr::CallReg(reg),
+            Instr::IDivReg(reg) => Instr::IDivReg(reg),
+
+            Instr::MovToReg(reg, val) => Instr::MovToReg(reg, frame.get_val(val, rsp_displacement)),
+            Instr::MovToMem(mem, reg) => {
+                Instr::MovToMem(mem.into_asm_level(frame, rsp_displacement), reg)
+            }
+            Instr::Cmp(reg, val) => Instr::Cmp(reg, frame.get_val(val, rsp_displacement)),
+            Instr::Add(reg, val) => Instr::Add(reg, frame.get_val(val, rsp_displacement)),
+            Instr::Sub(reg, val) => Instr::Sub(reg, frame.get_val(val, rsp_displacement)),
+            Instr::IMul(reg, val) => Instr::IMul(reg, frame.get_val(val, rsp_displacement)),
+            Instr::IDivMem(mem) => Instr::IDivMem(mem.into_asm_level(frame, rsp_displacement)),
+            Instr::Inc(loc) => Instr::Inc(loc.into_asm_level(frame, rsp_displacement)),
+            Instr::Dec(loc) => Instr::Dec(loc.into_asm_level(frame, rsp_displacement)),
+            Instr::Neg(loc) => Instr::Neg(loc.into_asm_level(frame, rsp_displacement)),
+            Instr::Not(loc) => Instr::Not(loc.into_asm_level(frame, rsp_displacement)),
+            Instr::Lea(reg, mem) => Instr::Lea(reg, mem.into_asm_level(frame, rsp_displacement)),
+            Instr::Push(val) => Instr::Push(frame.get_val(val, rsp_displacement)),
+        }
     }
 }
 
@@ -1124,27 +1003,6 @@ fn emit_header(out: &mut impl Write) -> AsmGenResult {
     writeln!(out, "extern {}", NEW_FUNC)?;
 
     writeln!(out, "\nglobal main\n")?;
-
-    // Label::Named(Ident::from("main".to_string())).emit(out)?;
-
-    // let stack_growth = main_frame.frame_size - RETADDR_SIZE;
-    // if stack_growth != 0 {
-    //     state.advance_rsp(stack_growth as isize).emit(out)?;
-    // }
-
-    // Instr::Call(Label::Named(Ident::from(REAL_MAIN.to_string()))).emit(out)?;
-
-    // if stack_growth != 0 {
-    //     state.reset_rsp().emit(out)?;
-    // }
-
-    // Instr::Ret.emit(out)?;
-
-    // Label::Func(Ident::from("_notaligned")).emit(out)?;
-    // Instr::MovToReg(RDI, Val::Instant(Instant(66))).emit(out)?;
-    // Instr::MovToReg(RAX, Val::Instant(SYS_EXIT)).emit(out)?;
-    // Instr::Syscall.emit(out)?;
-
     Ok(())
 }
 
