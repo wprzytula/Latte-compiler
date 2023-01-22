@@ -23,8 +23,8 @@ pub enum LiveVarsAnalysisState {
 }
 
 #[derive(Debug)]
-pub struct FlowAnalysis {
-    /*before_nth_quadruple*/ live_variables: Vec<VecSet<Var>>,
+pub(crate) struct FlowAnalysis {
+    /*before_nth_quadruple*/ pub live_variables: Vec<VecSet<Var>>,
     live_variables_analysis_state: LiveVarsAnalysisState,
     // TODO: reaching definitions?
 }
