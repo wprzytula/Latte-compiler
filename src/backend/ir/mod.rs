@@ -267,9 +267,7 @@ pub(crate) enum EndType {
 
 #[derive(Debug)]
 pub(crate) enum BasicBlockKind {
-    Other,
     Initial,
-    AfterReturn,
     WhileCond,
     WhileBody,
     WhileNext,
