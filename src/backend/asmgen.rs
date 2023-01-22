@@ -447,7 +447,7 @@ impl Ir {
     pub fn emit_assembly(&self, out: &mut impl Write) -> AsmGenResult {
         info!("---- COMPILING TO ASSEMBLY INSTRUCTIONS ----");
         let (instructions, frames) = self.cfg.asm_instructions();
-        debug!("Assembly immediate code: {:#?}", &instructions);
+        // trace!("Assembly immediate code: {:#?}", &instructions);
 
         info!("---- ASSEMBLY EMITTING ----");
         self.cfg

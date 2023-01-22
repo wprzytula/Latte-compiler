@@ -1,5 +1,5 @@
 use hashbrown::{HashMap, HashSet};
-use log::{debug, info, trace};
+use log::{debug, error, info, trace};
 use std::fmt;
 use std::ops::Deref;
 use vector_map::set::VecSet;
@@ -21,6 +21,9 @@ impl fmt::Debug for Reg {
         <Self as fmt::Display>::fmt(&self, f)
     }
 }
+
+const CALLER_SAVE_REGS: &[Reg] = &[RAX, RCX, RDX, R8, R9, R10, R11];
+const CALLEE_SAVE_REGS: &[Reg] = &[RBX, RBP, R12, R13, R14, R15];
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub(crate) enum Reg {
@@ -275,24 +278,35 @@ enum CalleeSaveRegState {
 }
 
 struct Description {
+    reallocation_robin: usize,
     caller_save_regs: VecMap<Reg, CallerSaveRegState>,
     callee_save_regs: VecMap<Reg, CalleeSaveRegState>,
 
     next_frame_offset: isize,
+
+    temporary_pool: VecMap<FrameOffset, Var>,
 
     var_locs: VecMap<Var, VarLoc>,
     persistent_vars: VecMap<Var, FrameOffset>,
 }
 
 impl Description {
+    fn next_offset(&mut self) -> FrameOffset {
+        let offset = self.next_frame_offset;
+        self.next_frame_offset += 1;
+        FrameOffset(offset)
+    }
+
     fn new_func(vars: &VecSet<Var>) -> Self {
         Self {
-            caller_save_regs: [RAX, RCX, RDX, R8, R9, R10, R11]
-                .into_iter()
+            caller_save_regs: CALLER_SAVE_REGS
+                .iter()
+                .copied()
                 .map(|reg| (reg, CallerSaveRegState::Free))
                 .collect(),
-            callee_save_regs: [RBX, RBP, R12, R13, R14, R15]
-                .into_iter()
+            callee_save_regs: CALLEE_SAVE_REGS
+                .iter()
+                .copied()
                 .map(|reg| (reg, CalleeSaveRegState::CallerTaken))
                 .collect(),
 
@@ -303,6 +317,8 @@ impl Description {
                 .map(|var| (var, VarLoc::empty()))
                 .collect(),
             persistent_vars: VecMap::new(),
+            reallocation_robin: CALLER_SAVE_REGS.len(),
+            temporary_pool: VecMap::new(),
         }
     }
 
@@ -311,11 +327,18 @@ impl Description {
             .iter_mut()
             .find_map(|(reg, state)| match state {
                 CallerSaveRegState::Free => {
+                    trace!("Allocated free {} for var {:?}", *reg, var);
                     *state = CallerSaveRegState::Taken(var);
                     Some(*reg)
                 }
                 CallerSaveRegState::Taken(prev_var) if live_atm.contains(prev_var) => None,
                 CallerSaveRegState::Taken(prev_var) => {
+                    trace!(
+                        "Allocated {} (taken by dead var {:?}) for var {:?}",
+                        *reg,
+                        prev_var,
+                        var
+                    );
                     self.var_locs.get_mut(prev_var).unwrap().regs.remove(reg);
                     *prev_var = var;
                     Some(*reg)
@@ -323,8 +346,84 @@ impl Description {
             })
     }
 
+    fn reallocate_taken_caller_save_reg(
+        &mut self,
+        var: Var,
+        live_atm: &VecSet<Var>,
+        instructions: &mut Vec<RaInstr>,
+    ) -> Reg {
+        self.reallocation_robin = (self.reallocation_robin + 1) % CALLER_SAVE_REGS.len();
+        let (&reg, state) = self
+            .caller_save_regs
+            .iter_mut()
+            .skip(self.reallocation_robin)
+            .next()
+            .unwrap();
+        match state {
+            CallerSaveRegState::Free => {
+                error!("Free reg during reallocation - this shouldn't happen.");
+                *state = CallerSaveRegState::Taken(var);
+            }
+            CallerSaveRegState::Taken(prev_var) => {
+                let prev_var = {
+                    let prev = *prev_var;
+                    *prev_var = var;
+                    prev
+                };
+                if self
+                    .var_locs
+                    .get_mut(&prev_var)
+                    .unwrap()
+                    .any_mem()
+                    .is_none()
+                {
+                    let loc = self
+                        .get_persistent_var(prev_var)
+                        .unwrap_or_else(|| self.alloc_from_temporary_mem_pool(prev_var, live_atm));
+                    self.var_locs.get_mut(&prev_var).unwrap().mem.insert(loc);
+                    instructions.push(Instr::MovToMem(RaMem::Stack { frame_offset: loc }, reg));
+                    trace!(
+                        "Reallocated {} (previously taken by {:?}) for var {:?}",
+                        reg,
+                        prev_var,
+                        var
+                    );
+                }
+            }
+        };
+        reg
+    }
+
+    fn alloc_from_temporary_mem_pool(&mut self, var: Var, live_atm: &VecSet<Var>) -> FrameOffset {
+        // first hope that some spilled var is now dead, so try to replace it
+        for (&loc, spilled_var) in self.temporary_pool.iter_mut() {
+            if !live_atm.contains(spilled_var) {
+                // success!
+                self.var_locs.get_mut(spilled_var).unwrap().mem.remove(&loc);
+                trace!(
+                    "Reallocated spilled {:?} (previously taken by {:?}) for var {:?}",
+                    loc,
+                    spilled_var,
+                    var
+                );
+                *spilled_var = var;
+                return loc;
+            }
+        }
+        // unfortunately, we must enlarge our pool
+        let new_spilled_loc = self.next_offset();
+        self.temporary_pool.insert(new_spilled_loc, var);
+        trace!(
+            "Allocated new spilled {:?} for var {:?}",
+            new_spilled_loc,
+            var
+        );
+
+        new_spilled_loc
+    }
+
     fn local_variables_count(&self) -> usize {
-        self.persistent_vars.len()
+        self.persistent_vars.len() + self.temporary_pool.len()
     }
 
     fn get_any_var_loc_preferring_regs(
@@ -360,7 +459,13 @@ impl Description {
     fn get_val(&mut self, val: Value) -> Val<RaLevel> {
         match val {
             Value::Instant(i) => Val::Instant(i),
-            Value::Variable(var) => Val::Mem(self.get_variable_mem(var)),
+            Value::Variable(var) => self
+                .var_locs
+                .get(&var)
+                .unwrap()
+                .any_reg()
+                .map(|reg| Val::Reg(reg))
+                .unwrap_or_else(|| Val::Mem(self.get_variable_mem(var))),
         }
     }
 
@@ -368,18 +473,20 @@ impl Description {
         if let Some(offset) = self.persistent_vars.get(&var) {
             *offset
         } else {
-            let offset = FrameOffset(self.next_frame_offset);
-            self.next_frame_offset += 1;
+            let offset = self.next_offset();
             self.persistent_vars.insert(var, offset);
             offset
         }
     }
 
-    fn get_persistent_var(&mut self, var: Var) -> Option<FrameOffset> {
+    fn get_persistent_var(&self, var: Var) -> Option<FrameOffset> {
         self.persistent_vars.get(&var).copied()
     }
 
     fn enter_block(&mut self, cfg: &CFG, block: BasicBlockIdx) {
+        for (_reg, state) in self.caller_save_regs.iter_mut() {
+            *state = CallerSaveRegState::Free;
+        }
         let live_in = cfg[block].flow_analysis.live_variables.first().unwrap();
         let live_out = cfg[block].flow_analysis.live_variables.last().unwrap();
         let live_in_out = live_in.union(live_out);
@@ -822,7 +929,7 @@ impl CFG {
                 )
                 .unzip();
 
-        debug!("Built frames: {:#?}", &frames);
+        // debug!("Built frames: {:#?}", &frames);
 
         (instructions, frames)
     }
@@ -914,11 +1021,29 @@ impl CFG {
                 let else_l = state.get_block_label(*else_block).clone();
 
                 // Cond
-                instructions.push(RaInstr::MovToReg(
-                    RAX,
-                    Val::Mem(description.get_variable_mem(*a)),
-                ));
-                instructions.push(RaInstr::Cmp(RAX, description.get_val(*b)));
+                let reg = description
+                    .var_locs
+                    .get(a)
+                    .unwrap()
+                    .any_reg()
+                    .unwrap_or_else(|| {
+                        let live_atm = self[func_block].flow_analysis.live_before_end_type();
+                        let reg = description
+                            .allocate_free_caller_save_reg(*a, live_atm)
+                            .unwrap_or_else(|| {
+                                description.reallocate_taken_caller_save_reg(
+                                    *a,
+                                    live_atm,
+                                    instructions,
+                                )
+                            });
+                        instructions.push(RaInstr::MovToReg(
+                            reg,
+                            Val::Mem(description.get_variable_mem(*a)),
+                        ));
+                        reg
+                    });
+                instructions.push(RaInstr::Cmp(reg, description.get_val(*b)));
 
                 let (then_instr, else_instr) = rel.instrs();
 
@@ -964,8 +1089,8 @@ impl BasicBlock {
         instructions: &mut Vec<RaInstr>,
         state: &mut RaGenState,
     ) {
-        for quadruple in self.quadruples.iter() {
-            quadruple.instructions(cfg, description, instructions, state);
+        for (quadruple_idx, quadruple) in self.quadruples.iter().enumerate() {
+            quadruple.instructions(cfg, description, instructions, state, quadruple_idx);
         }
     }
 }
@@ -977,6 +1102,7 @@ impl Quadruple {
         description: &mut Description,
         instructions: &mut Vec<RaInstr>,
         state: &mut RaGenState,
+        quadruple_idx: usize,
     ) {
         match self {
             Quadruple::BinOp(dst, op1, bin_op, op2) => {
