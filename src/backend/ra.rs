@@ -751,70 +751,67 @@ impl CFG {
                             ..
                         },
                     )| {
-                        let maybe_instrs = if matches!(convention, CallingConvention::SimpleCdecl) {
-                            let mut instructions = Vec::new();
-                            let mut description = Description::new_func();
+                        let (maybe_instrs, maybe_description) =
+                            if matches!(convention, CallingConvention::SimpleCdecl) {
+                                let mut instructions = Vec::new();
+                                let mut vars = self.variables_in_function(func);
+                                let mut description = Description::new_func(&vars);
 
-                            let mut vars = self.variables_in_function(func);
-                            vars.extend(&self.functions.get(func).unwrap().params);
-                            for var in vars.iter().copied() {
-                                description.get_or_register_persistent_var(var);
-                            }
+                                vars.extend(&self.functions.get(func).unwrap().params);
+                                for var in vars.iter().copied() {
+                                    description.get_or_register_persistent_var(var);
+                                }
 
-                            info!("Emitting ra function: {}", func);
+                                info!("Emitting ra function: {}", func);
 
-                            // Params in registers
-                            for (var, reg) in params.iter().copied().zip(params_registers()) {
-                                instructions.push(RaInstr::MovToMem(
-                                    description.get_variable_mem(var),
-                                    reg,
-                                ));
-                            }
-                            // Params on the stack
-                            for (no, var) in params
-                                .iter()
-                                .copied()
-                                .skip(params_registers().count())
-                                .enumerate()
-                            {
-                                instructions.push(RaInstr::MovToReg(
-                                    RAX,
-                                    Val::Mem(RaMem::Stack {
-                                        frame_offset: FrameOffset(-((no + 2) as isize)),
-                                    }),
-                                ));
-                                instructions.push(RaInstr::MovToMem(
-                                    description.get_variable_mem(var),
-                                    RAX,
-                                ));
-                            }
+                                // Params in registers
+                                for (var, reg) in params.iter().copied().zip(params_registers()) {
+                                    instructions.push(RaInstr::MovToMem(
+                                        description.get_variable_mem(var),
+                                        reg,
+                                    ));
+                                    let param_loc = description.get_or_register_persistent_var(var);
+                                    description.put_in_memory(var, param_loc);
+                                }
+                                // Params on the stack
+                                for (no, var) in params
+                                    .iter()
+                                    .copied()
+                                    .skip(params_registers().count())
+                                    .enumerate()
+                                {
+                                    instructions.push(RaInstr::MovToReg(
+                                        RAX,
+                                        Val::Mem(RaMem::Stack {
+                                            frame_offset: FrameOffset(-((no + 2) as isize)),
+                                        }),
+                                    ));
+                                    instructions.push(RaInstr::MovToMem(
+                                        description.get_variable_mem(var),
+                                        RAX,
+                                    ));
+                                }
 
-                            self.function_block_instructions(
-                                &mut description,
-                                &mut instructions,
-                                entry.unwrap(),
-                                &mut emitted,
-                                &mut state,
-                                None,
-                            );
-                            Some(instructions)
-                        } else {
-                            None
-                        };
+                                self.function_block_instructions(
+                                    &mut description,
+                                    &mut instructions,
+                                    entry.unwrap(),
+                                    &mut emitted,
+                                    &mut state,
+                                    None,
+                                );
+                                (Some(instructions), Some(description))
+                            } else {
+                                (None, None)
+                            };
 
                         let frame = match convention {
-                            CallingConvention::SimpleCdecl => {
-                                let mut variables = self.variables_in_function(func);
-                                variables.extend(params);
-                                Frame::new(
-                                    func.clone(),
-                                    isize::max(
-                                        params.len() as isize - ARGS_IN_REGISTERS as isize,
-                                        0,
-                                    ) as usize,
-                                    variables.len(),
-                                )
-                            }
+                            CallingConvention::SimpleCdecl => Frame::new(
+                                func.clone(),
+                                isize::max(params.len() as isize - ARGS_IN_REGISTERS as isize, 0)
+                                    as usize,
+                                maybe_description.unwrap().local_variables_count(),
+                            ),
                             CallingConvention::CdeclFFI => Frame::new_ffi(func.clone()),
                         };
 
@@ -855,10 +852,6 @@ impl CFG {
 
         match &self[func_block].end_type {
             Some(EndType::Return(None)) | None => {
-                // let stack_growth = frame.frame_size - RETADDR_SIZE;
-                // if stack_growth != 0 {
-                //     state.leave());;
-                // }
                 instructions.push(RaInstr::Ret);
             }
             Some(EndType::Return(Some(val))) => {
@@ -866,15 +859,15 @@ impl CFG {
                     ir::Value::Instant(i) => {
                         instructions.push(RaInstr::MovToReg(RAX, Val::Instant(*i)))
                     }
-                    ir::Value::Variable(var) => instructions.push(RaInstr::MovToReg(
-                        RAX,
-                        Val::Mem(description.get_variable_mem(*var)),
-                    )),
+                    ir::Value::Variable(var) => {
+                        let loc = description.get_any_var_loc_preferring_regs(*var, Some(RAX));
+                        if matches!(loc, Loc::Reg(RAX)) {
+                            // nothing to do
+                        } else {
+                            instructions.push(RaInstr::MovToReg(RAX, loc.into()))
+                        }
+                    }
                 }
-                // let stack_growth = frame.frame_size - RETADDR_SIZE;
-                // if stack_growth != 0 {
-                //     state.leave());;
-                // }
                 instructions.push(RaInstr::Ret);
             }
             Some(EndType::Goto(block_idx)) => {
