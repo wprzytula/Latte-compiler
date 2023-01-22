@@ -1,6 +1,7 @@
 use either::Either;
 use enum_as_inner::EnumAsInner;
 use log::{debug, info, trace, warn};
+use vector_map::set::VecSet;
 
 use std::{fmt, iter};
 
@@ -118,15 +119,15 @@ impl CFG {
     }
 
     /// Called only for function with our call conventions, i.e. emitted by the compiler.
-    pub fn variables_in_function(&self, func_name: &Ident) -> HashSet<Var> {
+    pub fn variables_in_function(&self, func_name: &Ident) -> VecSet<Var> {
         let entry = self.functions.get(func_name).unwrap().entry.unwrap(); // see above.
-        let mut variables = HashSet::new();
+        let mut variables = VecSet::new();
 
         fn dfs_variables(
             cfg: &CFG,
-            visited: &mut HashSet<BasicBlockIdx>,
+            visited: &mut VecSet<BasicBlockIdx>,
             block_idx: BasicBlockIdx,
-            variables: &mut HashSet<Var>,
+            variables: &mut VecSet<Var>,
         ) {
             if visited.contains(&block_idx) {
                 return;
@@ -141,7 +142,7 @@ impl CFG {
 
         dfs_variables(
             self,
-            &mut HashSet::<BasicBlockIdx>::new(),
+            &mut VecSet::<BasicBlockIdx>::new(),
             entry,
             &mut variables,
         );
@@ -212,7 +213,7 @@ impl BasicBlock {
         self.end_type = Some(new_end_type);
     }
 
-    fn defined_variables(&self, buf: &mut HashSet<Var>) {
+    fn defined_variables(&self, buf: &mut VecSet<Var>) {
         assert!(self.phi_nodes.is_empty());
         for var in self
             .quadruples

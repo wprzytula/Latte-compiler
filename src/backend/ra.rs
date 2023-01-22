@@ -1,8 +1,8 @@
 use hashbrown::{HashMap, HashSet};
 use log::{debug, info, trace};
-use smallvec::SmallVec;
-use std::fmt::{self, Pointer};
+use std::fmt;
 use std::ops::Deref;
+use vector_map::set::VecSet;
 use vector_map::VecMap;
 
 use crate::backend::asmgen::ARGS_IN_REGISTERS;
@@ -231,18 +231,18 @@ impl From<FrameOffset> for isize {
 }
 
 struct VarLoc {
-    regs: SmallVec<[Reg; 4]>,
-    mem: SmallVec<[FrameOffset; 3]>,
+    regs: VecSet<Reg>,
+    mem: VecSet<FrameOffset>,
 }
 impl VarLoc {
     fn is_in_reg(&self) -> bool {
         !self.regs.is_empty()
     }
     fn any_reg(&self) -> Option<Reg> {
-        self.regs.first().copied()
+        self.regs.iter().next().copied()
     }
     fn any_mem(&self) -> Option<FrameOffset> {
-        self.mem.first().copied()
+        self.mem.iter().next().copied()
     }
 }
 
