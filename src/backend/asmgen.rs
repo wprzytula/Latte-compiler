@@ -24,8 +24,6 @@ pub(crate) fn params_registers() -> impl Iterator<Item = Reg> {
     [RDI, RSI, RDX, RCX, R8, R9].into_iter()
 }
 
-const SYS_EXIT: Instant = Instant(60);
-
 type AsmGenResult = io::Result<()>;
 
 enum Loc {
@@ -917,22 +915,6 @@ impl Quadruple {
                         for arg in args.iter().copied().skip(params_registers().count()).rev() {
                             Instr::Push(frame.get_val(arg, state.rsp_displacement)).emit(out)?;
                             state.rsp_displacement += QUADWORD_SIZE as isize;
-
-                            /* Instr::MovToReg(RAX, frame.get_val(arg, state.rsp_displacement))
-                                .emit(out)?;
-
-                            Instr::MovToMem(
-                                Mem {
-                                    word_len: WordLen::Qword,
-                                    base: RSP,
-                                    index: None,
-                                    displacement: Some(
-                                        -((QUADWORD_SIZE + no * QUADWORD_SIZE) as isize),
-                                    ),
-                                },
-                                RAX,
-                            )
-                            .emit(out)?; */
                         }
 
                         // // place arguments in corresponding callee's variables
