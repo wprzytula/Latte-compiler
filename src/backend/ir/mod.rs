@@ -1,5 +1,5 @@
 mod gen;
-mod liveness;
+pub mod liveness;
 // mod opts;
 
 pub(crate) use gen::{CONCAT_STRINGS_FUNC, NEW_FUNC};
