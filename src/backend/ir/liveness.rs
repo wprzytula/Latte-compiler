@@ -327,7 +327,7 @@ impl CFG {
     }
 
     pub(super) fn liveness_analysis(&mut self) {
-        info!("Beginning Liveness Analysis");
+        info!("----- BEGINNING LIVENESS ANALYSIS -------");
         for block in self.blocks.iter_mut() {
             block
                 .flow_analysis
