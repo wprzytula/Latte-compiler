@@ -709,82 +709,74 @@ impl CFG {
                             ..
                         },
                     )| {
-                        (
-                            (
-                                func.clone(),
-                                match convention {
-                                    CallingConvention::SimpleCdecl => {
-                                        let mut variables = self.variables_in_function(func);
-                                        variables.extend(params);
-                                        Frame::new(
-                                            func.clone(),
-                                            isize::max(
-                                                params.len() as isize - ARGS_IN_REGISTERS as isize,
-                                                0,
-                                            ) as usize,
-                                            variables.len(),
-                                        )
-                                    }
-                                    CallingConvention::CdeclFFI => Frame::new_ffi(func.clone()),
-                                },
-                            ),
+                        let maybe_instrs = if matches!(convention, CallingConvention::SimpleCdecl) {
+                            let mut instructions = Vec::new();
+                            let mut description = Description::new_func();
+
+                            let mut vars = self.variables_in_function(func);
+                            vars.extend(&self.functions.get(func).unwrap().params);
+                            for var in vars.iter().copied() {
+                                description.get_or_register_persistent_var(var);
+                            }
+
+                            info!("Emitting ra function: {}", func);
+
+                            // Params in registers
+                            for (var, reg) in params.iter().copied().zip(params_registers()) {
+                                instructions.push(RaInstr::MovToMem(
+                                    description.get_variable_mem(var),
+                                    reg,
+                                ));
+                            }
+                            // Params on the stack
+                            for (no, var) in params
+                                .iter()
+                                .copied()
+                                .skip(params_registers().count())
+                                .enumerate()
                             {
-                                let maybe_instrs =
-                                    if matches!(convention, CallingConvention::SimpleCdecl) {
-                                        let mut instructions = Vec::new();
-                                        let mut description = Description::new_func();
+                                instructions.push(RaInstr::MovToReg(
+                                    RAX,
+                                    Val::Mem(RaMem::Stack {
+                                        frame_offset: FrameOffset(-((no + 2) as isize)),
+                                    }),
+                                ));
+                                instructions.push(RaInstr::MovToMem(
+                                    description.get_variable_mem(var),
+                                    RAX,
+                                ));
+                            }
 
-                                        let mut vars = self.variables_in_function(func);
-                                        vars.extend(&self.functions.get(func).unwrap().params);
-                                        for var in vars.iter().copied() {
-                                            description.get_or_register_persistent_var(var);
-                                        }
+                            self.function_block_instructions(
+                                &mut description,
+                                &mut instructions,
+                                entry.unwrap(),
+                                &mut emitted,
+                                &mut state,
+                                None,
+                            );
+                            Some(instructions)
+                        } else {
+                            None
+                        };
 
-                                        info!("Emitting ra function: {}", func);
+                        let frame = match convention {
+                            CallingConvention::SimpleCdecl => {
+                                let mut variables = self.variables_in_function(func);
+                                variables.extend(params);
+                                Frame::new(
+                                    func.clone(),
+                                    isize::max(
+                                        params.len() as isize - ARGS_IN_REGISTERS as isize,
+                                        0,
+                                    ) as usize,
+                                    variables.len(),
+                                )
+                            }
+                            CallingConvention::CdeclFFI => Frame::new_ffi(func.clone()),
+                        };
 
-                                        // Params in registers
-                                        for (var, reg) in
-                                            params.iter().copied().zip(params_registers())
-                                        {
-                                            instructions.push(RaInstr::MovToMem(
-                                                description.get_variable_mem(var),
-                                                reg,
-                                            ));
-                                        }
-                                        // Params on the stack
-                                        for (no, var) in params
-                                            .iter()
-                                            .copied()
-                                            .skip(params_registers().count())
-                                            .enumerate()
-                                        {
-                                            instructions.push(RaInstr::MovToReg(
-                                                RAX,
-                                                Val::Mem(RaMem::Stack {
-                                                    frame_offset: FrameOffset(-((no + 2) as isize)),
-                                                }),
-                                            ));
-                                            instructions.push(RaInstr::MovToMem(
-                                                description.get_variable_mem(var),
-                                                RAX,
-                                            ));
-                                        }
-
-                                        self.function_block_instructions(
-                                            &mut description,
-                                            &mut instructions,
-                                            entry.unwrap(),
-                                            &mut emitted,
-                                            &mut state,
-                                            None,
-                                        );
-                                        Some(instructions)
-                                    } else {
-                                        None
-                                    };
-                                (func.clone(), maybe_instrs)
-                            },
-                        )
+                        ((func.clone(), frame), (func.clone(), maybe_instrs))
                     },
                 )
                 .unzip();
