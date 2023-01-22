@@ -39,6 +39,16 @@ impl Default for FlowAnalysis {
 }
 
 impl FlowAnalysis {
+    pub(crate) fn live_before_end_type(&self) -> &VecSet<Var> {
+        assert!(matches!(
+            self.live_variables_analysis_state,
+            LiveVarsAnalysisState::Finished
+        ));
+        self.live_variables
+            .get(self.live_variables.len() - 2)
+            .unwrap()
+    }
+
     fn init_and_perform_local_analysis(
         &mut self,
         quadruples: &[Quadruple],
