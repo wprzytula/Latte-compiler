@@ -1,8 +1,9 @@
 use std::{
-    collections::{HashMap, HashSet},
     fmt::Display,
     io::{self, Write},
 };
+
+use hashbrown::{HashMap, HashSet};
 
 use log::{debug, info, trace};
 use vector_map::VecMap;
