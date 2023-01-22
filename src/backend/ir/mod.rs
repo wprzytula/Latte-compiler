@@ -207,6 +207,13 @@ pub(crate) enum Quadruple {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BasicBlockIdx(usize);
+impl Deref for BasicBlockIdx {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum CallingConvention {
@@ -290,7 +297,7 @@ pub(crate) struct BasicBlock {
     entry: bool,
     pub end_type: Option<EndType>,
     phi_nodes: VecMap<Var, VecMap<BasicBlockIdx, Var>>,
-    flow_analysis: FlowAnalysis,
+    pub flow_analysis: FlowAnalysis,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
