@@ -8,7 +8,7 @@ use hashbrown::HashMap;
 use log::{debug, info, trace};
 
 use crate::{
-    backend::ra::{RAX, RSP},
+    backend::ra::RSP,
     frontend::semantic_analysis::{ast::Ident, INITIAL_FUNCS},
 };
 
@@ -348,17 +348,15 @@ impl AsmInstr {
 #[derive(Debug)]
 pub(crate) struct Frame {
     pub(crate) name: Ident,
-    pub(crate) params: Vec<FrameOffset>,
-    local_variables_count: usize,
+    pub(crate) local_variables_count: usize,
     // variables_mapping: VecMap<ir::Var, Var>, // var -> offset wrt RBP (frame)
-    frame_size: usize, // in bytes, must be divisible by 16
+    pub(crate) frame_size: usize, // in bytes, must be divisible by 16
 }
 
 impl Frame {
     pub(crate) fn new(
         name: Ident,
         _stack_parameters_count: usize,
-        params: Vec<FrameOffset>,
         local_variables_count: usize,
         // variables: HashSet<ir::Var>,
     ) -> Self {
@@ -376,16 +374,14 @@ impl Frame {
             frame_size: ((local_variables_count + 1/*retaddr*/) * QUADWORD_SIZE + QUADWORD_SIZE)
                 / 16
                 * 16, /*stack alignment*/
-            params,
         }
     }
 
-    pub(crate) fn new_ffi(name: Ident, params: Vec<FrameOffset>) -> Self {
+    pub(crate) fn new_ffi(name: Ident) -> Self {
         Self {
             name,
             local_variables_count: 0,
             frame_size: RETADDR_SIZE,
-            params,
         }
     }
 
@@ -464,7 +460,7 @@ impl CFG {
         &self,
         out: &mut impl Write,
         string_literals: &Vec<String>,
-        instructions: Vec<(Ident, Vec<Instr<RaLevel>>)>,
+        instructions: Vec<(Ident, Option<Vec<Instr<RaLevel>>>)>,
         frames: HashMap<Ident, Frame>,
     ) -> AsmGenResult {
         writeln!(out, "section .data")?;
@@ -477,8 +473,11 @@ impl CFG {
 
         emit_header(out)?;
 
-        for (func, instructions) in instructions {
-            info!("Emitting function: {}", func);
+        for (func, instructions) in instructions
+            .into_iter()
+            .filter_map(|(func, maybe_instrs)| maybe_instrs.map(|instrs| (func, instrs)))
+        {
+            info!("Emitting asm function: {}", func);
             writeln!(out, "")?;
             Label::Named(func.clone()).emit(out)?;
             let frame = frames.get(&func).unwrap();
@@ -487,34 +486,6 @@ impl CFG {
             let stack_growth = frame.frame_size - RETADDR_SIZE;
             if stack_growth != 0 {
                 state.reset_rsp().emit(out)?;
-            }
-
-            // Params in registers
-            for (var, reg) in frame.params.iter().copied().zip(params_registers()) {
-                AsmInstr::MovToMem(frame.get_variable_mem(var, state.rsp_displacement), reg)
-                    .emit(out)?;
-            }
-            // Params on the stack
-            // TODO: do not copy them, use as-are, on the other side of the return address.
-            for (no, offset) in frame
-                .params
-                .iter()
-                .copied()
-                .skip(params_registers().count())
-                .enumerate()
-            {
-                AsmInstr::MovToReg(
-                    RAX,
-                    Val::Mem(Mem {
-                        word_len: WordLen::Qword,
-                        base: RSP,
-                        index: None,
-                        displacement: Some((frame.frame_size + no * QUADWORD_SIZE) as isize),
-                    }),
-                )
-                .emit(out)?;
-                AsmInstr::MovToMem(frame.get_variable_mem(offset, state.rsp_displacement), RAX)
-                    .emit(out)?;
             }
 
             for instr in instructions {
