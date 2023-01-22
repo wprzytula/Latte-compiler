@@ -87,7 +87,6 @@ impl BinOpType {
 
 #[derive(Debug)]
 pub enum UnOpType {
-    Not,
     Neg,
 }
 

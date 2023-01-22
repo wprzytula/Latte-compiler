@@ -3,10 +3,9 @@ use std::{
     io::{self, Write},
 };
 
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 
 use log::{debug, info, trace};
-use vector_map::VecMap;
 
 use crate::{
     backend::ra::{RAX, RSP},
@@ -14,10 +13,7 @@ use crate::{
 };
 
 use super::{
-    ir::{
-        self, BasicBlock, BasicBlockIdx, BinOpType, CallingConvention, Class, EndType, Instant, Ir,
-        IrFunction, Method, Quadruple, StringLiteral, UnOpType, CFG, CONCAT_STRINGS_FUNC, NEW_FUNC,
-    },
+    ir::{self, Class, Instant, Ir, Method, StringLiteral, CFG, CONCAT_STRINGS_FUNC, NEW_FUNC},
     ra::{
         CalleeSaveReg, CallerSaveReg, FrameOffset, Instr, InstrLevel, Label, Loc, RaLevel, RaMem,
         Reg, Val, R8, R9, RCX, RDI, RDX, RSI,
@@ -223,7 +219,7 @@ pub struct Var(isize);
 impl Display for Label {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Label::Num(n) => write!(f, "__block_{}", n),
+            Label::Num(n) => write!(f, ".__block_{}", n),
             Label::Named(id) => f.write_str(id),
             Label::Str(n) => write!(f, "__string_{}", n.0),
         }
@@ -289,7 +285,13 @@ impl AsmInstr {
         }
         write!(out, "\t")?;
         match self {
-            AsmInstr::Empty => writeln!(out, ""),
+            AsmInstr::Newline => writeln!(out, ""),
+            AsmInstr::Empty => Ok(()),
+            AsmInstr::AdjustRSPForStackParam => unreachable!(),
+            AsmInstr::AdvanceRSPForCall(_) => unreachable!(),
+            AsmInstr::ResetRSP => unreachable!(),
+
+            AsmInstr::Label(label) => label.emit(out),
             AsmInstr::Jmp(label) => writeln!(out, "jmp {}", label),
             AsmInstr::Jz(label) => writeln!(out, "jz {}", label),
             AsmInstr::Jnz(label) => writeln!(out, "jnz {}", label),
@@ -328,7 +330,6 @@ impl AsmInstr {
             AsmInstr::LoadString(reg, idx) => {
                 writeln!(out, "lea {}, [rel {}]", reg, Label::Str(*idx))
             }
-            Instr::Label(_) => unreachable!(),
         }
     }
 }
@@ -408,7 +409,7 @@ impl Frame {
         // CALLEE_RET_ADDR  - -40   -  -8
         // frame_size = 48
         // b <- frame + -8
-        let res = isize::from(offset) + self.frame_size as isize
+        let res = -(isize::from(offset) * QUADWORD_SIZE as isize) + self.frame_size as isize
             - RETADDR_SIZE as isize
             - QUADWORD_SIZE as isize;
         // trace!("Queried {:?} retaddr offset, got {}.", variable, res);
@@ -450,6 +451,7 @@ impl Ir {
     pub fn emit_assembly(&self, out: &mut impl Write) -> AsmGenResult {
         info!("---- COMPILING TO ASSEMBLY INSTRUCTIONS ----");
         let (instructions, frames) = self.cfg.asm_instructions();
+        debug!("Assembly immediate code: {:#?}", &instructions);
 
         info!("---- ASSEMBLY EMITTING ----");
         self.cfg
@@ -516,7 +518,14 @@ impl CFG {
             }
 
             for instr in instructions {
-                instr.convert(frame, state.rsp_displacement).emit(out)?;
+                let instr = instr.convert(frame, &mut state);
+                if matches!(instr, Instr::Ret) {
+                    let stack_growth = frame.frame_size - RETADDR_SIZE;
+                    if stack_growth != 0 {
+                        state.leave().emit(out)?;
+                    }
+                }
+                instr.emit(out)?;
             }
         }
         Ok(())
@@ -954,7 +963,7 @@ impl CFG {
 } */
 
 impl Instr<RaLevel> {
-    fn convert(self, frame: &Frame, rsp_displacement: isize) -> AsmInstr {
+    fn convert(self, frame: &Frame, state: &mut AsmGenState) -> AsmInstr {
         match self {
             Instr::Jmp(l) => Instr::Jmp(l),
             Instr::Jz(l) => Instr::Jz(l),
@@ -963,7 +972,7 @@ impl Instr<RaLevel> {
             Instr::Jge(l) => Instr::Jge(l),
             Instr::Jl(l) => Instr::Jl(l),
             Instr::Jle(l) => Instr::Jle(l),
-            Instr::Empty => Instr::Empty,
+            Instr::Newline => Instr::Newline,
             Instr::Label(l) => Instr::Label(l),
             Instr::Test(reg) => Instr::Test(reg),
             Instr::LoadString(reg, lit) => Instr::LoadString(reg, lit),
@@ -976,21 +985,35 @@ impl Instr<RaLevel> {
             Instr::CallReg(reg) => Instr::CallReg(reg),
             Instr::IDivReg(reg) => Instr::IDivReg(reg),
 
-            Instr::MovToReg(reg, val) => Instr::MovToReg(reg, frame.get_val(val, rsp_displacement)),
-            Instr::MovToMem(mem, reg) => {
-                Instr::MovToMem(mem.into_asm_level(frame, rsp_displacement), reg)
+            Instr::MovToReg(reg, val) => {
+                Instr::MovToReg(reg, frame.get_val(val, state.rsp_displacement))
             }
-            Instr::Cmp(reg, val) => Instr::Cmp(reg, frame.get_val(val, rsp_displacement)),
-            Instr::Add(reg, val) => Instr::Add(reg, frame.get_val(val, rsp_displacement)),
-            Instr::Sub(reg, val) => Instr::Sub(reg, frame.get_val(val, rsp_displacement)),
-            Instr::IMul(reg, val) => Instr::IMul(reg, frame.get_val(val, rsp_displacement)),
-            Instr::IDivMem(mem) => Instr::IDivMem(mem.into_asm_level(frame, rsp_displacement)),
-            Instr::Inc(loc) => Instr::Inc(loc.into_asm_level(frame, rsp_displacement)),
-            Instr::Dec(loc) => Instr::Dec(loc.into_asm_level(frame, rsp_displacement)),
-            Instr::Neg(loc) => Instr::Neg(loc.into_asm_level(frame, rsp_displacement)),
-            Instr::Not(loc) => Instr::Not(loc.into_asm_level(frame, rsp_displacement)),
-            Instr::Lea(reg, mem) => Instr::Lea(reg, mem.into_asm_level(frame, rsp_displacement)),
-            Instr::Push(val) => Instr::Push(frame.get_val(val, rsp_displacement)),
+            Instr::MovToMem(mem, reg) => {
+                Instr::MovToMem(mem.into_asm_level(frame, state.rsp_displacement), reg)
+            }
+            Instr::Cmp(reg, val) => Instr::Cmp(reg, frame.get_val(val, state.rsp_displacement)),
+            Instr::Add(reg, val) => Instr::Add(reg, frame.get_val(val, state.rsp_displacement)),
+            Instr::Sub(reg, val) => Instr::Sub(reg, frame.get_val(val, state.rsp_displacement)),
+            Instr::IMul(reg, val) => Instr::IMul(reg, frame.get_val(val, state.rsp_displacement)),
+            Instr::IDivMem(mem) => {
+                Instr::IDivMem(mem.into_asm_level(frame, state.rsp_displacement))
+            }
+            Instr::Inc(loc) => Instr::Inc(loc.into_asm_level(frame, state.rsp_displacement)),
+            Instr::Dec(loc) => Instr::Dec(loc.into_asm_level(frame, state.rsp_displacement)),
+            Instr::Neg(loc) => Instr::Neg(loc.into_asm_level(frame, state.rsp_displacement)),
+            Instr::Not(loc) => Instr::Not(loc.into_asm_level(frame, state.rsp_displacement)),
+            Instr::Lea(reg, mem) => {
+                Instr::Lea(reg, mem.into_asm_level(frame, state.rsp_displacement))
+            }
+            Instr::Push(val) => Instr::Push(frame.get_val(val, state.rsp_displacement)),
+
+            Instr::Empty => Instr::Empty,
+            Instr::AdvanceRSPForCall(advance) => state.advance_rsp(advance as isize),
+            Instr::AdjustRSPForStackParam => {
+                state.rsp_displacement += QUADWORD_SIZE as isize;
+                Instr::Empty
+            }
+            Instr::ResetRSP => state.reset_rsp(),
         }
     }
 }
