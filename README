@@ -10,3 +10,5 @@ Dependencies:
     - smallvec - a Vec that stores first n elements in-place, resorting to heap allocation only if n limit has been reached. Optimisation attempt.
     - lazy_static - enables executing e.g. heap-requiring code as statics.
     - vector-map - implements a map on vector, in hope that it will be faster than hashmaps for small amounts of data.
+    - log, env_logger - logging utilities.
+    - hashbrown - faster HashTables.
