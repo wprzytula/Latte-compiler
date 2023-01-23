@@ -32,6 +32,7 @@ type AsmGenResult = io::Result<()>;
 
 type AsmInstr = Instr<AsmLevel>;
 
+#[derive(Clone, Copy)]
 struct AsmLevel;
 impl InstrLevel for AsmLevel {
     type Mem = Mem;
@@ -110,6 +111,7 @@ impl Display for Val<AsmLevel> {
     }
 }
 
+#[derive(Clone, Copy)]
 enum MemScale {
     One,
     Two,
@@ -130,6 +132,8 @@ impl Display for MemScale {
         )
     }
 }
+
+#[derive(Clone, Copy)]
 struct MemIndex {
     index: Reg,
     scale: MemScale,
@@ -140,6 +144,7 @@ impl Display for MemIndex {
     }
 }
 
+#[derive(Clone, Copy)]
 enum WordLen {
     Byte,
     Qword,
@@ -152,6 +157,8 @@ impl Display for WordLen {
         })
     }
 }
+
+#[derive(Clone, Copy)]
 struct Mem {
     word_len: WordLen,
     base: Reg,

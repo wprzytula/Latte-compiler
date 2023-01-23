@@ -83,12 +83,14 @@ pub(crate) enum Loc<I: InstrLevel> {
     Mem(I::Mem),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Val<I: InstrLevel> {
     Reg(Reg),
     Instant(Instant),
     Mem(I::Mem),
 }
+
+impl<I: InstrLevel> Copy for Val<I> {}
 
 impl<I: InstrLevel> From<Loc<I>> for Val<I> {
     fn from(loc: Loc<I>) -> Self {
@@ -99,7 +101,7 @@ impl<I: InstrLevel> From<Loc<I>> for Val<I> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct RaLevel;
 impl InstrLevel for RaLevel {
     type Mem = RaMem;
@@ -107,14 +109,14 @@ impl InstrLevel for RaLevel {
 
 pub(crate) type RaInstr = Instr<RaLevel>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum RaMem {
     Stack { frame_offset: FrameOffset },
     Heap { base: Reg, displacement: isize },
 }
 
-pub(crate) trait InstrLevel {
-    type Mem;
+pub(crate) trait InstrLevel: Copy {
+    type Mem: Copy;
 }
 
 #[derive(Debug)]
@@ -221,6 +223,29 @@ impl From<FrameOffset> for isize {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Tmp(usize);
+
+#[derive(Debug, Clone, Copy)]
+enum Ent {
+    Tmp(Tmp),
+    Var(Var),
+}
+
+#[derive(Clone, Copy)]
+enum RegBlacklist {
+    One(Reg),
+    Two(Reg, Reg),
+}
+impl RegBlacklist {
+    fn contains(&self, reg: Reg) -> bool {
+        match *self {
+            RegBlacklist::One(reg1) => reg1 == reg,
+            RegBlacklist::Two(reg1, reg2) => reg1 == reg || reg2 == reg,
+        }
+    }
+}
+
 struct VarLoc {
     regs: VecSet<Reg>,
     mem: VecSet<FrameOffset>,
@@ -249,7 +274,7 @@ impl VarLoc {
 
 enum CallerSaveRegState {
     Free,
-    Taken(Var),
+    Taken(Ent),
 }
 
 enum CalleeSaveRegState {
@@ -264,6 +289,7 @@ struct Description {
     callee_save_regs: VecMap<Reg, CalleeSaveRegState>,
 
     next_frame_offset: isize,
+    next_temporary_transaction: usize,
 
     temporary_pool: VecMap<FrameOffset, Var>,
 
@@ -276,6 +302,18 @@ impl Description {
         let offset = self.next_frame_offset;
         self.next_frame_offset += 1;
         FrameOffset(offset)
+    }
+
+    fn transaction_begins(&mut self) -> Tmp {
+        Tmp(self.next_temporary_transaction)
+    }
+
+    fn transaction_finished(&mut self) {
+        self.next_temporary_transaction += 1;
+    }
+
+    fn is_tmp_current(&self, tmp: Tmp) -> bool {
+        self.next_temporary_transaction == tmp.0
     }
 
     fn new_func(vars: &VecSet<Var>) -> Self {
@@ -300,6 +338,7 @@ impl Description {
             persistent_vars: VecMap::new(),
             reallocation_robin: CALLER_SAVE_REGS.len(),
             temporary_pool: VecMap::new(),
+            next_temporary_transaction: 0,
         }
     }
 
@@ -308,20 +347,23 @@ impl Description {
         var: Var,
         live_atm: &VecSet<Var>,
         instructions: &mut Vec<RaInstr>,
+        blacklist: Option<RegBlacklist>,
     ) -> Reg {
-        self.any_reg(var)
-            .unwrap_or_else(|| self.allocate_caller_save_reg(var, live_atm, instructions))
+        self.any_reg(var).unwrap_or_else(|| {
+            self.allocate_caller_save_reg(Ent::Var(var), live_atm, instructions, blacklist)
+        })
     }
 
     fn allocate_caller_save_reg(
         &mut self,
-        var: Var,
+        ent: Ent,
         live_atm: &VecSet<Var>,
         instructions: &mut Vec<RaInstr>,
+        blacklist: Option<RegBlacklist>,
     ) -> Reg {
-        self.allocate_free_caller_save_any_reg(var, live_atm)
+        self.allocate_free_caller_save_any_reg(ent, live_atm, blacklist)
             .unwrap_or_else(|| {
-                self.reallocate_taken_caller_save_robin_reg(var, live_atm, instructions)
+                self.reallocate_taken_caller_save_robin_reg(ent, live_atm, instructions, blacklist)
             })
     }
 
@@ -332,48 +374,69 @@ impl Description {
         live_atm: &VecSet<Var>,
         instructions: &mut Vec<RaInstr>,
     ) -> Reg {
-        self.allocate_free_caller_save_provided_reg(var, reg, live_atm)
+        self.allocate_free_caller_save_provided_reg(var.map(|var| Ent::Var(var)), reg, live_atm)
             .unwrap_or_else(|| {
-                self.reallocate_taken_caller_save_provided_reg(var, reg, live_atm, instructions)
+                self.reallocate_taken_caller_save_provided_reg(
+                    var.map(|var| Ent::Var(var)),
+                    reg,
+                    live_atm,
+                    instructions,
+                )
             })
     }
 
     fn allocate_free_caller_save_provided_reg(
         &mut self,
-        var: Option<Var>,
+        ent: Option<Ent>,
         reg: Reg,
         live_atm: &VecSet<Var>,
     ) -> Option<Reg> {
         let reg = match self.caller_save_regs.get_mut(&reg).unwrap() {
             state @ CallerSaveRegState::Free => {
-                if let Some(var) = var {
-                    trace!("Allocated free {} for var {:?}", reg, var);
-                    *state = CallerSaveRegState::Taken(var);
+                if let Some(ent) = ent {
+                    trace!("Allocated free {} for ent {:?}", reg, ent);
+                    *state = CallerSaveRegState::Taken(ent);
                 } else {
                     trace!("Deallocated for free {}", reg);
                 }
                 Some(reg)
             }
-            CallerSaveRegState::Taken(prev_var) if live_atm.contains(prev_var) => None,
-            CallerSaveRegState::Taken(prev_var) => {
-                if let Some(var) = var {
+            CallerSaveRegState::Taken(Ent::Var(prev_var)) if live_atm.contains(prev_var) => None,
+            CallerSaveRegState::Taken(Ent::Var(prev_var)) => {
+                if let Some(ent) = ent {
                     trace!(
-                        "Allocated {} (taken by dead var {:?}) for var {:?}",
+                        "Allocated {} (taken by dead var {:?}) for ent {:?}",
                         reg,
                         prev_var,
-                        var
+                        ent
                     );
                     self.var_locs.get_mut(prev_var).unwrap().regs.remove(&reg);
-                    *prev_var = var;
+                    unimplemented!("Too little time...");
+                    // *prev_var = ent;
                 } else {
-                    trace!("Deallocated {} (was taken by dead var {:?})", reg, prev_var,);
+                    trace!("Deallocated {} (was taken by dead var {:?})", reg, prev_var);
                 }
                 Some(reg)
             }
+            CallerSaveRegState::Taken(Ent::Tmp(tmp)) => {
+                let tmp = *tmp;
+                if self.is_tmp_current(tmp) {
+                    None
+                } else {
+                    if let Some(var) = ent {
+                        trace!("Allocated {} (taken by past tmp) for var {:?}", reg, var);
+                    } else {
+                        trace!("Deallocated {} (was taken by past tmp)", reg);
+                    }
+                    Some(reg)
+                }
+            }
         };
         if let Some(reg) = reg {
-            if let Some(var) = var {
-                self.var_locs.get_mut(&var).unwrap().regs.insert(reg);
+            if let Some(ent) = ent {
+                if let Ent::Var(var) = ent {
+                    self.var_locs.get_mut(&var).unwrap().regs.insert(reg);
+                }
                 // not sure if I should do it already here, but probably should.
             } else {
                 *self.caller_save_regs.get_mut(&reg).unwrap() = CallerSaveRegState::Free;
@@ -384,42 +447,50 @@ impl Description {
 
     fn allocate_free_caller_save_any_reg(
         &mut self,
-        var: Var,
+        ent: Ent,
         live_atm: &VecSet<Var>,
+        blacklist: Option<RegBlacklist>,
     ) -> Option<Reg> {
         CALLER_SAVE_REGS
             .iter()
             .find(|&reg| {
-                self.allocate_free_caller_save_provided_reg(Some(var), *reg, live_atm)
-                    .is_some()
+                blacklist.map(|b| !b.contains(*reg)).unwrap_or(true)
+                    && self
+                        .allocate_free_caller_save_provided_reg(Some(ent), *reg, live_atm)
+                        .is_some()
             })
             .copied()
     }
 
     fn reallocate_taken_caller_save_provided_reg(
         &mut self,
-        var: Option<Var>,
+        ent: Option<Ent>,
         reg: Reg,
         live_atm: &VecSet<Var>,
         instructions: &mut Vec<RaInstr>,
     ) -> Reg {
+        let current_tmp = self.transaction_begins();
         let state = self.caller_save_regs.get_mut(&reg).unwrap();
         match state {
             CallerSaveRegState::Free => {
                 error!("Free reg during reallocation - this shouldn't happen.");
-                if let Some(var) = var {
-                    *state = CallerSaveRegState::Taken(var);
+                if let Some(ent) = ent {
+                    *state = CallerSaveRegState::Taken(ent);
                 }
             }
-            CallerSaveRegState::Taken(prev_var) => {
+            CallerSaveRegState::Taken(Ent::Var(prev_var)) => {
                 let prev_var = {
                     let prev = *prev_var;
-                    if let Some(var) = var {
-                        *prev_var = var;
+                    if let Some(ent) = ent {
+                        if let Ent::Var(var) = ent {
+                            *prev_var = var;
+                        } else {
+                            unimplemented!();
+                        }
                     }
                     prev
                 };
-                if let Some(var) = var {
+                if let Some(var) = ent {
                     trace!(
                         "Reallocated {} (previously taken by {:?}) for var {:?}",
                         reg,
@@ -445,9 +516,22 @@ impl Description {
                     instructions.push(Instr::MovToMem(RaMem::Stack { frame_offset: loc }, reg));
                 }
             }
+            CallerSaveRegState::Taken(Ent::Tmp(tmp)) => {
+                let tmp = *tmp;
+                if tmp == current_tmp {
+                    panic!("Attempted to allocate reg that is busy with a tmp from current transaction")
+                } else {
+                    error!("Past-tmp-taken reg during reallocation - this shouldn't happen.");
+                    if let Some(var) = ent {
+                        *state = CallerSaveRegState::Taken(var);
+                    }
+                }
+            }
         };
-        if let Some(var) = var {
-            self.var_locs.get_mut(&var).unwrap().regs.insert(reg);
+        if let Some(ent) = ent {
+            if let Ent::Var(var) = ent {
+                self.var_locs.get_mut(&var).unwrap().regs.insert(reg);
+            }
             // not sure if I should do it already here, but probably should.
         } else {
             *self.caller_save_regs.get_mut(&reg).unwrap() = CallerSaveRegState::Free;
@@ -457,19 +541,21 @@ impl Description {
 
     fn reallocate_taken_caller_save_robin_reg(
         &mut self,
-        var: Var,
+        ent: Ent,
         live_atm: &VecSet<Var>,
         instructions: &mut Vec<RaInstr>,
+        blacklist: Option<RegBlacklist>,
     ) -> Reg {
         self.reallocation_robin = (self.reallocation_robin + 1) % CALLER_SAVE_REGS.len();
         let reg = self
             .caller_save_regs
             .keys()
+            .chain(self.caller_save_regs.keys())
             .skip(self.reallocation_robin)
-            .next()
             .copied()
+            .find(|&reg| blacklist.map(|b| !b.contains(reg)).unwrap_or(true))
             .unwrap();
-        self.reallocate_taken_caller_save_provided_reg(Some(var), reg, live_atm, instructions)
+        self.reallocate_taken_caller_save_provided_reg(Some(ent), reg, live_atm, instructions)
     }
 
     fn alloc_from_temporary_mem_pool(&mut self, var: Var, live_atm: &VecSet<Var>) -> FrameOffset {
@@ -608,28 +694,122 @@ impl Description {
         }
     }
 
+    fn swap_registers(&mut self, reg1: Reg, reg2: Reg, instructions: &mut Vec<RaInstr>) {
+        assert_ne!(reg1, reg2);
+        let reg1state = self.caller_save_regs.get(&reg1).unwrap();
+        let reg2state = self.caller_save_regs.get(&reg2).unwrap();
+        match (reg1state, reg2state) {
+            (CallerSaveRegState::Taken(Ent::Var(var1)), CallerSaveRegState::Taken(Ent::Var(var2))) => {
+                let var1 = *var1;
+                let var2 = *var2;
+                *self.caller_save_regs.get_mut(&reg2).unwrap() = CallerSaveRegState::Taken(Ent::Var(var1));
+                *self.caller_save_regs.get_mut(&reg1).unwrap() = CallerSaveRegState::Taken(Ent::Var(var2));
+                let locs1 = self.var_locs.get_mut(&var1).unwrap();
+                locs1.regs.remove(&reg1);
+                locs1.regs.insert(reg2);
+                let locs2 = self.var_locs.get_mut(&var2).unwrap();
+                locs2.regs.remove(&reg2);
+                locs2.regs.insert(reg1);
+
+                instructions.push(Instr::Xchg(reg1, Loc::Reg(reg2)));
+            },
+            _ => unimplemented!("Swapping should only be done for taken regs.")
+            // (CallerSaveRegState::Free, CallerSaveRegState::Free) => (),
+            // (CallerSaveRegState::Free, CallerSaveRegState::Taken(var2)) => {
+            //     let var2 = *var2;
+
+            // }
+            // (CallerSaveRegState::Taken(var1), CallerSaveRegState::Free) => {
+            //     let var1 = *var1;
+            // },
+        }
+    }
+
     fn reserve_rax_and_rdx(
         &mut self,
         reg: Reg,
         op2: Value,
+        live_atm: &VecSet<Var>,
         instructions: &mut Vec<RaInstr>,
-    ) -> (Reg, Val<RaLevel>) {
+    ) -> (Reg, Loc<RaLevel>) {
         let val = self.get_val(op2);
-        match (reg, val) {
-            (RAX, Val::Reg(RDX)) => todo!(),
-            (RAX, Val::Reg(reg_op2)) => todo!(),
-            (RDX, Val::Reg(RAX)) => todo!(),
-            (RDX, Val::Reg(reg_op2)) => todo!(),
-            (reg_op1, Val::Reg(RAX)) => todo!(),
-            (reg_op1, Val::Reg(RDX)) => todo!(),
-            (reg_op1, Val::Reg(reg_op2)) => todo!(),
-            (RAX, Val::Instant(_)) => todo!(),
-            (RDX, Val::Instant(_)) => todo!(),
-            (reg_op1, Val::Instant(_)) => todo!(),
-            (RAX, Val::Mem(_)) => todo!(),
-            (RDX, Val::Mem(_)) => todo!(),
-            (reg_op1, Val::Mem(_)) => todo!(),
-        }
+        // At the end we want:
+        // RAX <- op1
+        // RDX <- free
+        // loc_somewhere_else <- op2
+        let val_loc = match val {
+            Val::Reg(reg) => match reg {
+                reg @ RAX | reg @ RDX => {
+                    match self.caller_save_regs.get(&reg).unwrap() {
+                        CallerSaveRegState::Free => unreachable!(),
+                        CallerSaveRegState::Taken(Ent::Var(var)) => {
+                            let var = *var;
+                            // let new_reg = self.allocate_caller_save_reg(*var, live_atm, instructions, Some(RegBlacklist::Two(RAX, RDX)));
+                            self.allocate_caller_save_provided_reg(
+                                None,
+                                reg,
+                                live_atm,
+                                instructions,
+                            ); // clears reg
+                               // self.var_locs.get_mut(var).unwrap().regs.remove(&reg);
+                               // self.var_locs.get_mut(var).unwrap().regs.insert(reg);
+                               // self.var_locs.get_mut(key)
+                            Loc::Mem(self.get_variable_mem(var))
+                        }
+                        CallerSaveRegState::Taken(Ent::Tmp(tmp)) => {
+                            unimplemented!("Too little time...")
+                        }
+                    }
+                }
+                reg => Loc::Reg(reg),
+            },
+            Val::Instant(i) => {
+                let tmp = self.transaction_begins();
+                let reg = self.allocate_caller_save_reg(
+                    Ent::Tmp(tmp),
+                    live_atm,
+                    instructions,
+                    Some(RegBlacklist::Two(RAX, RDX)),
+                ); // clears reg
+                Loc::Reg(reg)
+            }
+            Val::Mem(mem) => match mem {
+                RaMem::Stack { frame_offset } => Loc::Mem(mem), // ok
+                RaMem::Heap { base, displacement } => unimplemented!("Too little time..."),
+            },
+        };
+
+        match reg {
+            RAX => (), // done
+            reg => {}
+        };
+
+        (RAX, val_loc)
+
+        // match (reg, val) {
+
+        //     (RAX, Val::Reg(reg_op2)) => (reg, val), // everything great
+        //     (RAX, Val::Instant(_)) => todo!(), // everything great, except for allocating reg for instant
+        //     (RAX, Val::Reg(RDX)) => {
+        //         // put RDX down
+        //         todo!()
+        //     }
+        //     (RDX, Val::Reg(RAX)) => {
+        //         // RAX down, then RAX:=RDX, RDX down
+        //         todo!()
+        //     }
+        //     (RDX, Val::Reg(reg_op2)) => {
+        //         // allocate reg for op1,
+        //     }
+        //     (reg_op1, Val::Reg(RAX)) => todo!(),
+        //     (reg_op1, Val::Reg(RDX)) => todo!(),
+        //     (reg_op1, Val::Reg(reg_op2)) => todo!(),
+        //     (RDX, Val::Instant(_)) => todo!(),
+        //     (reg_op1, Val::Instant(_)) => todo!(),
+        //     (RAX, Val::Mem(_)) => todo!(),
+        //     (RDX, Val::Mem(_)) => todo!(),
+        //     (reg_op1, Val::Mem(_)) => todo!(),
+        // }
     }
 }
 
@@ -849,12 +1029,13 @@ impl CFG {
                     .unwrap_or_else(|| {
                         let live_atm = self[func_block].flow_analysis.live_before_end_type();
                         let reg = description
-                            .allocate_free_caller_save_any_reg(*a, live_atm)
+                            .allocate_free_caller_save_any_reg(Ent::Var(*a), live_atm, None)
                             .unwrap_or_else(|| {
                                 description.reallocate_taken_caller_save_robin_reg(
-                                    *a,
+                                    Ent::Var(*a),
                                     live_atm,
                                     instructions,
+                                    None,
                                 )
                             });
                         instructions.push(RaInstr::MovToReg(
@@ -944,8 +1125,12 @@ impl Quadruple {
                         op1_reg
                     }
                     _ => {
-                        let reg =
-                            description.allocate_caller_save_reg(*op1, live_before, instructions);
+                        let reg = description.allocate_caller_save_reg(
+                            Ent::Var(*op1),
+                            live_before,
+                            instructions,
+                            None,
+                        );
                         description.put_to_reg(*op1, reg);
                         instructions.push(RaInstr::MovToReg(reg, op1_loc.into()));
                         reg
@@ -965,33 +1150,27 @@ impl Quadruple {
                         description.variable_mutated(*dst, reg);
                     }
                     BinOpType::Div | BinOpType::Mod => {
-                        todo!();
                         // We need to have dividend in RAX=reg, divisor anywhere else than in RDX.
-                        let (dividend_reg, divisor_val) =
-                            description.reserve_rax_and_rdx(reg, *op2, instructions);
+                        let (dividend_reg, divisor_loc) =
+                            description.reserve_rax_and_rdx(reg, *op2, live_before, instructions);
                         assert!(matches!(
                             description.caller_save_regs.get(&RDX).unwrap(),
                             CallerSaveRegState::Free
                         ));
+                        assert!(dividend_reg == RAX);
                         instructions.push(RaInstr::Cqo);
-                        match divisor_val {
-                            Val::Reg(reg) => instructions.push(RaInstr::IDiv(Loc::Reg(reg))),
-                            Val::Instant(_) => {
-                                instructions.push(RaInstr::MovToReg(RCX, divisor_val));
-                                instructions.push(RaInstr::IDiv(Loc::Reg(RCX)));
-                            }
-                            Val::Mem(mem) => instructions.push(RaInstr::IDiv(Loc::Mem(mem))),
-                        }
+                        instructions.push(RaInstr::IDiv(divisor_loc));
                         match bin_op {
                             BinOpType::Div => description.variable_mutated(*dst, RAX),
                             BinOpType::Mod => description.variable_mutated(*dst, RDX),
                             _ => unreachable!(),
                         }
+                        description.transaction_finished();
                     }
                 };
             }
             Quadruple::UnOp(dst, un_op_type, op) => {
-                let reg = description.get_reg_or_allocate(*dst, live_before, instructions);
+                let reg = description.get_reg_or_allocate(*dst, live_before, instructions, None);
 
                 instructions.push(RaInstr::MovToReg(reg, description.get_val(*op)));
                 match un_op_type {
@@ -1006,7 +1185,12 @@ impl Quadruple {
                     .unwrap()
                     .any_reg()
                     .unwrap_or_else(|| {
-                        description.allocate_caller_save_reg(*dst, live_before, instructions)
+                        description.allocate_caller_save_reg(
+                            Ent::Var(*dst),
+                            live_before,
+                            instructions,
+                            None,
+                        )
                     });
 
                 description.variable_mutated(*dst, reg);
@@ -1020,12 +1204,12 @@ impl Quadruple {
                 // instructions.push(RaInstr::MovToMem(description.get_variable_mem(*dst), RAX));
             }
             Quadruple::Set(dst, i) => {
-                let reg = description.get_reg_or_allocate(*dst, live_before, instructions);
+                let reg = description.get_reg_or_allocate(*dst, live_before, instructions, None);
                 instructions.push(RaInstr::MovToReg(reg, Val::Instant(*i)));
                 description.variable_mutated(*dst, reg);
             }
             Quadruple::GetStrLit(dst, str_idx) => {
-                let reg = description.get_reg_or_allocate(*dst, live_before, instructions);
+                let reg = description.get_reg_or_allocate(*dst, live_before, instructions, None);
                 instructions.push(RaInstr::LoadString(reg, *str_idx));
                 description.variable_mutated(*dst, reg);
             }
@@ -1126,7 +1310,7 @@ impl Quadruple {
             Quadruple::InPlaceUnOp(op, ir_loc) => {
                 let loc = {
                     let var = ir_loc.var();
-                    let reg = description.get_reg_or_allocate(var, live_before, instructions);
+                    let reg = description.get_reg_or_allocate(var, live_before, instructions, None);
 
                     match ir_loc {
                         ir::Loc::Var(_) => {
