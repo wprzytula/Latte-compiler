@@ -134,14 +134,15 @@ pub(crate) enum Instr<I: InstrLevel> {
     MovToReg(Reg, Val<I>),
     MovToMem(I::Mem, Reg),
 
+    Xchg(Reg, Loc<I>),
+
     Test(Reg),
     Cmp(Reg, Val<I>),
     Add(Reg, Val<I>),
     Sub(Reg, Val<I>),
     IMul(Reg, Val<I>),
-    IDivReg(Reg),    // RDX:RAX divided by Reg, quotient in RAX, remainder in RDX.
-    IDivMem(I::Mem), // RDX:RAX divided by Mem, quotient in RAX, remainder in RDX.
-    Cqo,             // Prepared RDX as empty for IDiv
+    IDiv(Loc<I>), // RDX:RAX divided by Reg/Mem, quotient in RAX, remainder in RDX.
+    Cqo,          // Prepared RDX as empty for IDiv
     Inc(Loc<I>),
     Dec(Loc<I>),
     Neg(Loc<I>),
@@ -371,7 +372,10 @@ impl Description {
             }
         };
         if let Some(reg) = reg {
-            if var.is_none() {
+            if let Some(var) = var {
+                self.var_locs.get_mut(&var).unwrap().regs.insert(reg);
+                // not sure if I should do it already here, but probably should.
+            } else {
                 *self.caller_save_regs.get_mut(&reg).unwrap() = CallerSaveRegState::Free;
             }
         }
@@ -442,7 +446,10 @@ impl Description {
                 }
             }
         };
-        if var.is_none() {
+        if let Some(var) = var {
+            self.var_locs.get_mut(&var).unwrap().regs.insert(reg);
+            // not sure if I should do it already here, but probably should.
+        } else {
             *self.caller_save_regs.get_mut(&reg).unwrap() = CallerSaveRegState::Free;
         }
         reg
@@ -939,7 +946,7 @@ impl Quadruple {
                     _ => {
                         let reg =
                             description.allocate_caller_save_reg(*op1, live_before, instructions);
-                        // description.put_to_reg(*op1, reg);
+                        description.put_to_reg(*op1, reg);
                         instructions.push(RaInstr::MovToReg(reg, op1_loc.into()));
                         reg
                     }
@@ -959,15 +966,21 @@ impl Quadruple {
                     }
                     BinOpType::Div | BinOpType::Mod => {
                         todo!();
-                        let (reg, val) = description.reserve_rax_and_rdx(reg, *op2, instructions);
+                        // We need to have dividend in RAX=reg, divisor anywhere else than in RDX.
+                        let (dividend_reg, divisor_val) =
+                            description.reserve_rax_and_rdx(reg, *op2, instructions);
+                        assert!(matches!(
+                            description.caller_save_regs.get(&RDX).unwrap(),
+                            CallerSaveRegState::Free
+                        ));
                         instructions.push(RaInstr::Cqo);
-                        match val {
-                            Val::Reg(reg) => instructions.push(RaInstr::IDivReg(reg)),
+                        match divisor_val {
+                            Val::Reg(reg) => instructions.push(RaInstr::IDiv(Loc::Reg(reg))),
                             Val::Instant(_) => {
-                                instructions.push(RaInstr::MovToReg(RCX, val));
-                                instructions.push(RaInstr::IDivReg(RCX));
+                                instructions.push(RaInstr::MovToReg(RCX, divisor_val));
+                                instructions.push(RaInstr::IDiv(Loc::Reg(RCX)));
                             }
-                            Val::Mem(mem) => instructions.push(RaInstr::IDivMem(mem)),
+                            Val::Mem(mem) => instructions.push(RaInstr::IDiv(Loc::Mem(mem))),
                         }
                         match bin_op {
                             BinOpType::Div => description.variable_mutated(*dst, RAX),

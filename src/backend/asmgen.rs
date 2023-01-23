@@ -291,6 +291,7 @@ impl AsmInstr {
             AsmInstr::AdvanceRSPForCall(_) => unreachable!(),
             AsmInstr::ResetRSP => unreachable!(),
 
+            AsmInstr::Xchg(reg, loc) => writeln!(out, "xchg {}, {}", reg, loc),
             AsmInstr::Label(label) => label.emit(out),
             AsmInstr::Jmp(label) => writeln!(out, "jmp {}", label),
             AsmInstr::Jz(label) => writeln!(out, "jz {}", label),
@@ -308,8 +309,7 @@ impl AsmInstr {
             AsmInstr::Add(reg, val) => writeln!(out, "add {}, {}", reg, val),
             AsmInstr::Sub(reg, val) => writeln!(out, "sub {}, {}", reg, val),
             AsmInstr::IMul(reg, val) => writeln!(out, "imul {}, {}", reg, val),
-            AsmInstr::IDivReg(reg) => writeln!(out, "idiv {}", reg),
-            AsmInstr::IDivMem(mem) => writeln!(out, "idiv {}", mem),
+            AsmInstr::IDiv(reg) => writeln!(out, "idiv {}", reg),
             AsmInstr::Cqo => writeln!(out, "cqo"),
             AsmInstr::Inc(loc) => writeln!(out, "inc {}", loc),
             AsmInstr::Dec(loc) => writeln!(out, "dec {}", loc),
@@ -947,6 +947,9 @@ impl Instr<RaLevel> {
             Instr::Label(l) => Instr::Label(l),
             Instr::Test(reg) => Instr::Test(reg),
             Instr::LoadString(reg, lit) => Instr::LoadString(reg, lit),
+            Instr::Xchg(reg, loc) => {
+                Instr::Xchg(reg, loc.into_asm_level(frame, state.rsp_displacement))
+            }
             Instr::Cqo => Instr::Cqo,
             Instr::Sal(reg, i) => Instr::Sal(reg, i),
             Instr::Sar(reg, i) => Instr::Sar(reg, i),
@@ -954,7 +957,7 @@ impl Instr<RaLevel> {
             Instr::LeaLabel(reg, l) => Instr::LeaLabel(reg, l),
             Instr::Call(l) => Instr::Call(l),
             Instr::CallReg(reg) => Instr::CallReg(reg),
-            Instr::IDivReg(reg) => Instr::IDivReg(reg),
+            Instr::IDiv(loc) => Instr::IDiv(loc.into_asm_level(frame, state.rsp_displacement)),
 
             Instr::MovToReg(reg, val) => {
                 Instr::MovToReg(reg, frame.get_val(val, state.rsp_displacement))
@@ -966,9 +969,6 @@ impl Instr<RaLevel> {
             Instr::Add(reg, val) => Instr::Add(reg, frame.get_val(val, state.rsp_displacement)),
             Instr::Sub(reg, val) => Instr::Sub(reg, frame.get_val(val, state.rsp_displacement)),
             Instr::IMul(reg, val) => Instr::IMul(reg, frame.get_val(val, state.rsp_displacement)),
-            Instr::IDivMem(mem) => {
-                Instr::IDivMem(mem.into_asm_level(frame, state.rsp_displacement))
-            }
             Instr::Inc(loc) => Instr::Inc(loc.into_asm_level(frame, state.rsp_displacement)),
             Instr::Dec(loc) => Instr::Dec(loc.into_asm_level(frame, state.rsp_displacement)),
             Instr::Neg(loc) => Instr::Neg(loc.into_asm_level(frame, state.rsp_displacement)),
