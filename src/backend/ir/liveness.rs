@@ -2,7 +2,7 @@ use std::mem;
 
 use hashbrown::HashSet;
 use log::{debug, info, trace};
-use vector_map::set::VecSet;
+use vector_map::{set::VecSet, VecMap};
 
 use crate::backend::ir::{BasicBlockIdx, Value};
 
@@ -25,6 +25,7 @@ pub enum LiveVarsAnalysisState {
 #[derive(Debug)]
 pub(crate) struct FlowAnalysis {
     /*before_nth_quadruple*/ pub live_variables: Vec<VecSet<Var>>,
+    /*before_nth_quadruple*/ pub next_use: Vec<VecMap<Var, usize>>,
     live_variables_analysis_state: LiveVarsAnalysisState,
     // TODO: reaching definitions?
 }
@@ -34,6 +35,7 @@ impl Default for FlowAnalysis {
         Self {
             live_variables: Default::default(),
             live_variables_analysis_state: LiveVarsAnalysisState::NotYet,
+            next_use: Default::default(),
         }
     }
 }
@@ -62,33 +64,39 @@ impl FlowAnalysis {
             quadruples.len() + 2, /*before and after End*/
             Default::default(),
         );
+        self.next_use.resize(
+            quadruples.len() + 2, /*before and after End*/
+            VecMap::new(),
+        );
 
-        // Liveness
+        // Liveness - with next use
         // in[S] = (out [S] − kill [S]) ∪ use[S]
         // live before kth = (live after kth - lost during kth) ∪ read in kth
-        let mut live = VecSet::<Var>::new();
+        let mut next_use = VecMap::<Var, usize>::new();
         if let Some(end_type) = end_type {
             match *end_type {
                 EndType::Goto(_) => (),
                 EndType::Return(None) => (),
                 EndType::Return(Some(Value::Instant(_))) => (),
                 EndType::Return(Some(Value::Variable(var))) => {
-                    live.insert(var);
+                    next_use.insert(var, 0);
                 }
                 EndType::IfElse(var, _, val, _, _) => {
-                    live.insert(var);
+                    next_use.insert(var, 0);
                     if let Value::Variable(var) = val {
-                        live.insert(var);
+                        next_use.insert(var, 0);
                     }
                 }
             }
         }
-        self.live_variables[quadruples.len()] = live.clone();
+        self.live_variables[quadruples.len()] = next_use.keys().copied().collect();
+        self.next_use[quadruples.len()] = next_use.clone();
 
         let mut block_kill = VecSet::<Var>::new();
         for (idx, quadruple) in quadruples.iter().enumerate().rev() {
-            Self::update_kill_and_use(quadruple, &mut live, &mut block_kill);
-            self.live_variables[idx] = live.clone();
+            Self::update_kill_and_next_use(quadruple, &mut next_use, &mut block_kill);
+            self.live_variables[idx] = next_use.keys().copied().collect();
+            self.next_use[idx] = next_use.clone();
         }
 
         self.live_variables_analysis_state = LiveVarsAnalysisState::OngoingGlobal {
@@ -181,6 +189,102 @@ impl FlowAnalysis {
                 for arg in args {
                     if let Value::Variable(var) = arg {
                         live.insert(*var);
+                        block_kill.remove(var);
+                    }
+                }
+            }
+        };
+    }
+
+    fn update_kill_and_next_use(
+        quadruple: &Quadruple,
+        next_use: &mut VecMap<Var, usize>,
+        block_kill: &mut VecSet<Var>,
+    ) {
+        // kill
+        match quadruple {
+            Quadruple::BinOp(var, _, _, _)
+            | Quadruple::UnOp(var, _, _)
+            | Quadruple::Copy(var, _)
+            | Quadruple::Set(var, _)
+            | Quadruple::GetStrLit(var, _)
+            | Quadruple::Call(var, _, _)
+            | Quadruple::VirtualCall(var, _, _, _)
+            | Quadruple::DerefLoad(var, _) => {
+                next_use.remove(var);
+                block_kill.insert(*var);
+            }
+            Quadruple::DerefStore(_, _) => (),
+            Quadruple::VstStore(_, _) => (),
+            Quadruple::InPlaceUnOp(_, _) => (),
+            Quadruple::ArrLoad(_, _, _) => todo!(),
+            Quadruple::ArrStore(_, _, _) => todo!(),
+        }
+
+        // bump up next_use distance
+        for (_, dist) in next_use.iter_mut() {
+            *dist += 1;
+        }
+
+        // use
+        match quadruple {
+            Quadruple::BinOp(_, var2, _, val) => {
+                next_use.insert(*var2, 0);
+                block_kill.remove(var2);
+                if let Value::Variable(var) = val {
+                    next_use.insert(*var, 0);
+                    block_kill.remove(var);
+                }
+            }
+            Quadruple::UnOp(_, _, val) => {
+                if let Value::Variable(var) = val {
+                    next_use.insert(*var, 0);
+                    block_kill.remove(var);
+                }
+            }
+            Quadruple::Copy(_, var2) => {
+                next_use.insert(*var2, 0);
+                block_kill.remove(var2);
+            }
+            Quadruple::GetStrLit(_, _) | Quadruple::Set(_, _) => (),
+
+            Quadruple::ArrLoad(_, _, _) => todo!(),
+            Quadruple::ArrStore(_, _, _) => todo!(),
+
+            Quadruple::DerefLoad(_, mem) => {
+                next_use.insert(mem.base, 0);
+                block_kill.remove(&mem.base);
+            }
+            Quadruple::DerefStore(val, mem) => {
+                next_use.insert(mem.base, 0);
+                block_kill.remove(&mem.base);
+                if let Value::Variable(var) = val {
+                    next_use.insert(*var, 0);
+                    block_kill.remove(var);
+                }
+            }
+            Quadruple::Call(_, _, args) => {
+                for arg in args {
+                    if let Value::Variable(var) = arg {
+                        next_use.insert(*var, 0);
+                        block_kill.remove(var);
+                    }
+                }
+            }
+            Quadruple::InPlaceUnOp(_, loc) => {
+                next_use.insert(loc.var(), 0);
+                block_kill.remove(&loc.var());
+            }
+            Quadruple::VstStore(_, mem) => {
+                next_use.insert(mem.base, 0);
+                block_kill.remove(&mem.base);
+            }
+            Quadruple::VirtualCall(_, obj_var, _, args) => {
+                next_use.insert(*obj_var, 0);
+                block_kill.remove(obj_var);
+                for arg in args {
+                    if let Value::Variable(var) = arg {
+                        next_use.insert(*var, 0);
                         block_kill.remove(var);
                     }
                 }
