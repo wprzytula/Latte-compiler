@@ -18,4 +18,8 @@ tests/gen
 solution_front
 solution_back
 solution_back_fix
+solution_classes
+solution_structs
+solution_ra
+solution_virtual
 .gdb_history
