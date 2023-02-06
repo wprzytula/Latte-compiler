@@ -255,14 +255,14 @@ impl AsmGenState {
     }
 
     fn advance_rsp(&mut self, displacement: isize) -> AsmInstr {
-        trace!("Advancing RSP with displacement {}", -displacement);
+        // trace!("Advancing RSP with displacement {}", -displacement);
         self.rsp_displacement += displacement;
         AsmInstr::Sub(RSP, Val::Instant(Instant(displacement as i64)))
     }
 
     fn reset_rsp(&mut self) -> AsmInstr {
         let rsp_displacement = self.rsp_displacement;
-        trace!("Resetting RSP with displacement {}", rsp_displacement);
+    // trace!("Resetting RSP with displacement {}", rsp_displacement);
         self.rsp_displacement = 0;
         AsmInstr::Add(RSP, Val::Instant(Instant(rsp_displacement as i64)))
     }
